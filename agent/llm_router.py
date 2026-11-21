@@ -9,6 +9,7 @@ Backends:
     gemini  Google AI Studio via the google-genai SDK (pip install -e ".[gemini]")
 """
 
+import os
 import time
 from typing import TypeVar
 
@@ -129,9 +130,22 @@ class LLMRouter:
                 f"content={content[:120]!r}): {e.errors()[0]['msg'] if e.errors() else e}"
             ) from e
 
-    def _gemini(self, system: str, user: str, schema: type[T]) -> T:
+    def _gemini(self, system: str, user: str, schema: type[T], attempts: int = 2) -> T:
+        # Gemini free-tier models occasionally spike with transient 500/503 errors or truncated
+        # JSON. Mirror _ollama with one fast retry, without retrying 4xx, 504, or network errors.
+        for i in range(attempts):
+            try:
+                return self._gemini_once(system, user, schema)
+            except _TransientLLMError:
+                if i == attempts - 1:
+                    raise
+                time.sleep(0.5)
+        raise AssertionError("unreachable")
+
+    def _gemini_once(self, system: str, user: str, schema: type[T]) -> T:
         s = self.settings
-        if not s.gemini_api_key:
+        use_vertex = os.environ.get("GOOGLE_GENAI_USE_VERTEXAI", "").strip().lower() == "true"
+        if not use_vertex and not s.gemini_api_key:
             raise LLMError("GEMINI_API_KEY is not set")
         try:
             from google import genai
@@ -140,10 +154,12 @@ class LLMRouter:
             raise LLMError('google-genai not installed: pip install -e ".[gemini]"') from e
 
         if self._gemini_client is None:
-            self._gemini_client = genai.Client(
-                api_key=s.gemini_api_key,
-                http_options=types.HttpOptions(timeout=int(s.gemini_timeout_s * 1000)),  # milliseconds
-            )
+            http_options = types.HttpOptions(timeout=int(s.gemini_timeout_s * 1000))  # milliseconds
+            if use_vertex:
+                # Vertex AI via ADC: passing api_key would force express mode and ignore the project.
+                self._gemini_client = genai.Client(http_options=http_options)
+            else:
+                self._gemini_client = genai.Client(api_key=s.gemini_api_key, http_options=http_options)
         thinking = None
         if s.gemini_thinking_level:
             try:
@@ -164,7 +180,16 @@ class LLMRouter:
                 ),
             )
         except Exception as e:  # SDK raises several error types
+            code = getattr(e, "code", None)
+            if code in (500, 503):
+                raise _TransientLLMError(f"Gemini HTTP {code} (model={s.gemini_model}): {e}") from e
             raise LLMError(f"Gemini request failed (model={s.gemini_model}): {e}") from e
         if not resp.text:  # e.g. blocked by a safety filter
             raise LLMError(f"Gemini returned no text (model={s.gemini_model})")
-        return schema.model_validate_json(resp.text)
+        try:
+            return schema.model_validate_json(resp.text)
+        except ValidationError as e:
+            raise _TransientLLMError(
+                f"Gemini returned invalid {schema.__name__} JSON (model={s.gemini_model}, "
+                f"content={resp.text[:120]!r}): {e.errors()[0]['msg'] if e.errors() else e}"
+            ) from e

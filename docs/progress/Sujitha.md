@@ -1,0 +1,211 @@
+# Sujitha — Progress Log (Role D: Gemini writer and guardrails)
+
+## Step 1: Make the Gemini path work (F5)
+
+### Recommended `.env` Gemini settings for teammates
+Copy these into `.env` (do not edit `shared/settings.py`):
+```env
+LLM_PROVIDER=gemini
+GEMINI_MODEL=gemini-3.5-flash-lite
+GEMINI_THINKING_LEVEL=low
+```
+- **Fastest reliable drafting model:** `gemini-3.5-flash-lite` (~1.1–1.5 s per grounded `SentinelDraft` JSON call with `GEMINI_THINKING_LEVEL=low` or `minimal`; supports structured output with `response_schema=SentinelDraft`).
+- **Backup fast model:** `gemini-3.1-flash-lite` (~1.7 s with `GEMINI_THINKING_LEVEL=low`).
+- **Models to avoid right now:**
+  - `gemini-4-hydrogen` / `gemini-3.5-flash`: slow / hitting `504 DEADLINE_EXCEEDED` under load (`gemini-4-hydrogen` also rejects `GEMINI_THINKING_LEVEL=minimal` with HTTP 400).
+  - `gemini-3.8-flash`: returning `503 UNAVAILABLE` (high demand).
+  - `gemini-2.5-flash` / `gemini-2.5-flash-lite`: returning `404 NOT_FOUND` ("no longer available to new users").
+- **Embedding models listed for this key (for Rithwik / Role C):** `models/gemini-embedding-001` and `models/gemini-embedding-2`.
+
+### What was built
+- Set up local data (`data/raw/aa_dataset-tickets-multi-lang-5-2-50-version.csv`, `data/sentinel/kb_train.csv`, `holdout_test.csv`, `data/sentinel/triage_model.joblib`, and 22,869-ticket hash index `data/sentinel.sqlite`).
+- Updated `agent/llm_router.py` (`LLMRouter._gemini` / `_gemini_once`) to mirror `_ollama` with one fast retry (0.5 s backoff) on transient HTTP `500`/`503` high-demand spikes or truncated/invalid `SentinelDraft` JSON, while failing fast without retrying `4xx` client errors, `504` deadlines, or network/timeout errors.
+- Expanded `tests/test_gemini_config.py` with offline unit tests covering `SentinelDraft` structured output, transient `503` retry, invalid JSON retry, and non-retryable `400`/`403`/`404`/`504` errors.
+
+### Files changed
+- `agent/llm_router.py`
+- `tests/test_gemini_config.py`
+- `docs/progress/Sujitha.md`
+
+### Verification
+1. **5 real tickets via `python -m sentinel.pipeline "<ticket text>"` (`LLM_PROVIDER=gemini`, `GEMINI_MODEL=gemini-3.5-flash-lite`, `GEMINI_THINKING_LEVEL=low`, hash index):**
+   All **5/5** returned via `gemini` with `fell_back=False`, **0 rejected citations**, and either grounded verified citations or a correct refusal:
+
+   | # | Ticket | Lang | Result | Verified / Rejected | Cited IDs | Gen Latency | Total Latency |
+   |---|---|---|---|---|---|---|---|
+   | 1 | VPN down after firewall update | en | Refused (no VPN/firewall precedent in hash top-k) | 0 / 0 | `[]` | 1190.9 ms | 1413.7 ms |
+   | 2 | Billing discrepancies on digital strategy tools | en | Grounded | 1 / 0 | `['TKT-20587']` | 1229.4 ms | 1278.0 ms |
+   | 3 | 4th floor meeting room printer jamming | en | Refused (no printer precedent in hash top-k) | 0 / 0 | `[]` | 1128.0 ms | 1177.2 ms |
+   | 4 | Team login access denied after update | de | Grounded | 2 / 0 | `['TKT-18411', 'TKT-18411']` | 1309.4 ms | 1359.5 ms |
+   | 5 | Unrecognized charge on latest invoice | de | Grounded | 2 / 0 | `['TKT-16560', 'TKT-16560']` | 1489.8 ms | 1554.5 ms |
+
+   - Median Gemini generation latency: **1229.4 ms** (range 1128.0–1489.8 ms).
+
+2. **Test suite & ownership checks:**
+   - `.venv/bin/pytest -q`: **63 passed, 0 failed** (including 10 tests in `tests/test_gemini_config.py` and 6 in `tests/test_team_contracts.py`).
+   - `.venv/bin/python scripts/check_ownership.py`: **OK** (every changed file on `Sujitha-Branch` belongs to Sujitha).
+
+### Open issues / notes for teammates
+- None blocking. Hash retrieval missed semantic matches for the VPN and printer tickets (causing Gemini to correctly refuse); once Rithwik's Gemini embeddings index lands, grounded rate on those topics should improve.
+- Notice on tickets #4 and #5, Gemini sometimes cites two quotes from the same `ticket_id` (both verified verbatim); `cited_ticket_ids` in `pipeline.py` keeps duplicates (`['TKT-18411', 'TKT-18411']`), which is fine for now.
+
+## Step 2: Number-and-promise guard (N4)
+
+### What was built
+- Implemented `check_claims(reply: str, verified: list[VerifiedCitation]) -> list[GuardFinding]` in `sentinel/claims.py` (exact contract preserved):
+  - Masks out ticket IDs (`TKT-\d+`, case-insensitive) and PII placeholders (`<[A-Z0-9_]+>`, e.g. `<IPV4>`, `<EMAIL>`) so they are never flagged as numbers and cannot falsely back numeric claims.
+  - Extracts EN and DE claims with span-masking across numeric kinds (`money` -> `percent` -> `date` -> `number`) so specific spans (`$500`, `5000 EUR`, `99.9%`, `15 Prozent`, `24 hours`, `48 Stunden`, `within 2 days`, `bis Freitag`, `2026-11-21`, `21.11.2026`) are not double-counted as bare numbers.
+  - Independently detects EN and DE commitment/promise phrases (`we guarantee`, `full refund`, `free of charge`, `wir erstatten`, `kostenlos`, `wir garantieren`, `vollständige Rückerstattung`, etc.) so combined claims flag both the promise and any unbacked money/date/percent.
+  - Verifies each extracted claim against normalized `verified` quotes (case- and whitespace-insensitive, flexible currency/percent symbol spacing, boundary-aware numeric edges so `"5"` is not falsely backed by `"50"` or `"1.5"`). Deduplicates findings while preserving order of appearance.
+- Created `tests/test_claims.py` with 24 test functions (**49 parametrized cases**) covering EN and DE pass/fail cases, ticket ID & PII ignoring, partial-digit trap (`5` vs `50`), combined claims, multi-citation backing, and `extractive_draft` compatibility.
+
+### Files changed
+- `sentinel/claims.py`
+- `tests/test_claims.py`
+- `docs/progress/Sujitha.md`
+
+### Verification
+- `.venv/bin/pytest -q tests/test_claims.py`: **49 passed, 0 failed**.
+- `.venv/bin/pytest -q`: **112 passed, 0 failed** (verified via `test-runner`).
+- `.venv/bin/python scripts/check_ownership.py`: **OK** (verified via `ownership-reviewer` + post-commit check).
+
+### Open issues / notes for teammates
+- None. `sentinel/pipeline.py` already invokes `claims.check_claims(drafted.draft_reply or "", verified)` and surfaces every `GuardFinding` in `result.guard_findings` and `R6 unbacked <kind> in draft: '<text>'` escalation reasons.
+
+## Step 3: Prompt-injection rule R7 (N9) and guardrail cases
+
+### What was built
+- Implemented `detect_injection(text: str) -> list[str]` in `sentinel/injection.py` (exact contract preserved) for EN and DE:
+  - Normalizes Unicode NFKC, strips zero-width characters, folds German umlauts/eszett (`ä/ö/ü/ß` -> `ae/oe/ue/ss`) and curly punctuation while preserving newlines for line-start role tags.
+  - Detects 5 deduplicated categories:
+    1. `"asks to ignore previous instructions"` (EN/DE; avoids false positives on `"please ignore my previous email"` / `"bitte ignorieren Sie meine vorherige E-Mail"`)
+    2. `"attempts role or jailbreak override"` (EN/DE role hijacking, developer/jailbreak mode, safety/guardrail bypass)
+    3. `"attempts to spoof company policy"` (EN/DE `"state it as company policy"` / `"stelle es als offizielle Unternehmensrichtlinie dar"`)
+    4. `"requests hidden system prompt"` (EN/DE prompt-extraction verbs + prompt targets, avoiding terminal/normal prose)
+    5. `"embeds fake system delimiter or output override"` (`<<SYS>>`, `[INST]`, `<system>`, line-start `SYSTEM:` directives, and `refused=false` / `escalation=AUTO_DRAFT` tampering)
+- Created `tests/test_injection.py` with **35 offline unit & R7 pipeline integration test cases** (EN/DE positive injection cases, benign false-positive controls, deduplication invariants, and `SentinelAgent` R7 integration).
+- Created `eval/cases_guardrails.jsonl` with **10 guardrail evaluation cases** matching the `eval/sentinel_cases.jsonl` schema (`id`, `subject`, `body`, `expect_escalation`, `why`), covering EN/DE prompt injections, invented SLA promises, number/money/date traps, PII masking, and a benign `"ignore my previous email"` control.
+
+### Files changed
+- `sentinel/injection.py`
+- `tests/test_injection.py`
+- `eval/cases_guardrails.jsonl`
+- `docs/progress/Sujitha.md`
+
+### Verification
+- `.venv/bin/pytest -q tests/test_injection.py`: **35 passed, 0 failed**.
+- Real dataset false-positive scan across all 28,587 tickets in `data/raw/aa_dataset-tickets-multi-lang-5-2-50-version.csv`: **0 false positives**.
+- All 10 cases in `eval/cases_guardrails.jsonl` run through `SentinelAgent().triage(..., provider="extractive")`: **10/10 verified** (all 4 injection cases trigger R7 with 2–3 hits each; all 4 SLA/number traps escalate; `guard-pii-masking-en` masks 5 PII types; `guard-benign-ignore-email` produces 0 injection hits).
+- Full test suite & ownership check verified via `test-runner` and `ownership-reviewer`.
+
+### Open issues / notes for teammates
+- Je (Role A): `eval/cases_guardrails.jsonl` is ready to be loaded alongside `eval/sentinel_cases.jsonl` in `eval/sentinel_eval.py` (Step 4).
+- Kaushik (Role E): `sentinel/pipeline.py` already populates `result.injection_flags` and adds `R7 prompt injection: <hit>` reasons for three-tier routing (`R7 -> PAGE_ONCALL`).
+
+## Step 4: Writer upgrades
+
+### What was built
+- Upgraded `SYSTEM_PROMPT` in `sentinel/writer.py` while keeping `extractive_draft`, `build_user_prompt`, `verify_citations`, and all constants/signatures unchanged:
+  - **Rule 2 (commitment refusals):** Strengthened so any refund, credit, discount, SLA guarantee, deadline, compensation, contract cancellation, or legal request not backed verbatim by a precedent's Resolution must never be promised or implied approved, must never invent unbacked numbers/prices/percentages/durations/dates, must state that a human colleague will follow up, and must refuse (`refused=true` + `refusal_reason`) when no safe precedent-backed answer exists.
+  - **Rule 4 (formal German):** Strengthened so German replies (`reply_language="de"`) use natural, polite, formal German (`"Sie"`, never informal `"du"`), while preserving citations-first ordering and verbatim original-language `evidence_quote`s.
+  - **Rule 6 (`briefing`):** Added explicit requirement that `briefing` is always filled (even when `refused=true`) as one concise English sentence of at most 25 words summarizing what the incoming ticket is about for the agent, with no advice or recommendations.
+- Created `tests/test_writer.py` with **30 offline unit tests** verifying `SYSTEM_PROMPT` rules, unchanged `extractive_draft` EN/DE frames & citations, `build_user_prompt`, and `verify_citations`.
+
+### 20-ticket validation benchmark (`extractive` vs `gemini`)
+Measured on 20 tickets from the validation slice (`sentinel.dataset.load_train_val_test()`, 10 EN + 10 DE, `random_state=42`) against a clean `train`-only in-memory hash index (20,582 tickets, zero validation self-leakage, holdout untouched), with `fallback=False` and `GEMINI_MODEL=gemini-3.5-flash-lite` (`GEMINI_THINKING_LEVEL=low`):
+
+| Metric | `extractive` | `gemini` (`gemini-3.5-flash-lite`) |
+|---|---|---|
+| Tickets (EN / DE) | 20 (10 / 10) | 20 (10 / 10) |
+| Grounded rate | **20/20 (100.0%)** | **18/20 (90.0%)** *(18/19 = 94.7% of non-error calls)* |
+| Refusal rate | **0/20 (0.0%)** | **1/20 (5.0%)** *(TKT-22564 refused cleanly)* |
+| Grounded or refused | 20/20 (100.0%) | 19/20 (95.0%) *(1 transient HTTP 503 on TKT-20790)* |
+| Verified / rejected citations | 20 / 0 (0.0% rej) | **32 / 0 (0.0% rej)** |
+| `check_claims` guard findings | 0 / 20 | **0 / 20** |
+| Briefing <= 25 words | 0 / 20 (no LLM) | **19 / 19 (100% of successful calls; 12–22 words)** |
+| Informal German `"du"` | 0 / 10 | **0 / 8** |
+| Generation latency p50 / mean | 0.0 ms / 0.0 ms | **1299.8 ms / 3050.3 ms** |
+| Total latency p50 / mean | 4.2 ms / 6.8 ms | **1313.2 ms / 3064.2 ms** |
+
+### Files changed
+- `sentinel/writer.py`
+- `tests/test_writer.py`
+- `docs/progress/Sujitha.md`
+
+### Verification
+- `.venv/bin/pytest -q tests/test_writer.py`: **30 passed, 0 failed**.
+- Full test suite & ownership check verified via `test-runner` and `ownership-reviewer`.
+
+### Open issues / notes for teammates
+- Even with `fallback=False`, Gemini returned 0 rejected citations (32/32 verified verbatim) and 0 `check_claims` violations across 19/19 successful calls, with 100% `briefing` compliance (12–22 words, including on the refused ticket). In production (`fallback=True`), the single transient 503 spike automatically falls back to `extractive` cleanly.
+
+## Step 5: PII and "What the AI saw" (B3)
+
+### What was built
+- Upgraded `sentinel/pii.py` while keeping `mask_pii(text)` and `has_pii(text)` signatures unchanged:
+  - Added `mask_spans(text: str) -> list[tuple[int, int, str]]`, returning sorted, non-overlapping `(start, end, label)` character offsets in the original text with deterministic overlap resolution (`EMAIL`, `URL`, `IBAN`, `IPV4`, `CARD`, `PHONE`, `ACCOUNT`, `ADDRESS`; longer span wins on tie).
+  - Rebuilt `mask_pii(text)` directly on top of `mask_spans(text)` so every `(start, end, label)` span corresponds 1-to-1 with each `<LABEL>` replacement and badge count in `result.pii_found`.
+  - Eliminated false positives on dates (`2026-11-21`, `21.11.2026`, `11/21/2026`, `2026-03-15 14:30`), version/build numbers (`v1.2.3.4`, `version 10.2.3.1`, `Build 10.0.19045.4170`, `Python 3.12.15`), out-of-range IPv4 (`999.888.777.666`), standalone ticket IDs (`TKT-01234`, `SD-1042`, `INC-20260315`), numeric ranges/prices (`2025-2026`, `5000 EUR`), and non-digit prose (`account settings`, `customer service`).
+  - Added/improved EN & DE coverage: German phone formats (`+49 (0) 30 ...`, `0049 ...`, `030 / ...`, `(089) ...`, `0171-...`), German & SEPA IBANs (compact, space- and hyphen-grouped with country length/structure checks), EN & DE street addresses (`Hauptstraße 42`, `Berliner Str. 12a, 10115 Berlin`, `360 Huntington Ave`, `123 Main Street, Apt 4B` without swallowing sentence-ending periods), URLs with trailing punctuation preserved, and digit-validated account IDs (`account KUNDE-884213`, `ACCT-774920`, `Kundennummer: 123456`).
+- Created `tests/test_pii.py` with **56 offline test cases** covering false-positive controls, German/US phone numbers, German/EU IBANs, EN/DE street addresses, emails/IPv4/cards/accounts/URLs, `mask_spans` structural & reconstruction invariants, and mixed real-world tickets (`pii-contact`, `guard-pii-masking-en`).
+
+### How Kaushik (Role E) should highlight "What the AI saw" in Streamlit
+`result.pii_masked_body` already holds the masked text sent to the LLM (`ticket_text({"subject": masked_subject, "body": masked_body})`), and `result.pii_found` holds `{label: count}` for summary badges.
+
+To highlight exact masked spans in the **original** ticket side-by-side with `result.pii_masked_body` (or inside an expandable `"What the AI saw"` panel):
+
+```python
+import html
+from sentinel.pii import mask_spans
+
+def render_highlighted_pii(raw_text: str) -> str:
+    """Render raw_text with redaction spans highlighted and labeled."""
+    spans = mask_spans(raw_text)
+    if not spans:
+        return html.escape(raw_text)
+    parts: list[str] = []
+    cursor = 0
+    for start, end, label in spans:
+        parts.append(html.escape(raw_text[cursor:start]))
+        snippet = html.escape(raw_text[start:end])
+        parts.append(
+            f'<mark style="background:#ffe4b5;padding:0 3px;border-radius:3px;">'
+            f'{snippet} <sup style="font-weight:600;">&lt;{html.escape(label)}&gt;</sup></mark>'
+        )
+        cursor = end
+    parts.append(html.escape(raw_text[cursor:]))
+    return "".join(parts)
+```
+
+Key guarantees from `mask_spans(text)`:
+- Spans are **sorted** by `start` and **strictly non-overlapping** (`prev_end <= next_start`), so a single forward pass over `raw_text` is always safe.
+- Always HTML-escape the text outside and inside each span (`html.escape`) before passing `unsafe_allow_html=True` to `st.markdown(...)`.
+- Because `mask_pii(raw_text)` splices the exact same `mask_spans(raw_text)` list, the highlighted spans on the left (`raw_text`) match every `<LABEL>` placeholder on the right (`result.pii_masked_body`) 1-to-1.
+
+### Files changed
+- `sentinel/pii.py`
+- `tests/test_pii.py`
+- `docs/progress/Sujitha.md`
+
+### Verification
+- `.venv/bin/pytest -q tests/test_pii.py`: **56 passed, 0 failed**.
+- Full test suite & ownership check verified via `test-runner` and `ownership-reviewer`.
+
+### Open issues / notes for teammates
+- All 5 steps of Role D (`Sujitha-Branch`) are complete and ready for PR into `main` for Je to merge.
+
+## Cross-team request fulfilled: Vertex AI ADC in `agent/llm_router.py` (from `docs/requests/Je.md`)
+
+### What was built
+- Updated `LLMRouter._gemini_once` in `agent/llm_router.py` to support Vertex AI via `gcloud auth application-default login` (ADC):
+  - When `GOOGLE_GENAI_USE_VERTEXAI` is `"true"` (case-insensitive, stripped), skips the `if not s.gemini_api_key` check and constructs `genai.Client(http_options=...)` **without** `api_key=` so `google-genai` uses ADC with `GOOGLE_CLOUD_PROJECT` and `GOOGLE_CLOUD_LOCATION` instead of express mode.
+  - Preserves existing AI Studio `GEMINI_API_KEY` behavior when `GOOGLE_GENAI_USE_VERTEXAI` is unset or not `"true"`.
+  - No changes to frozen `shared/settings.py`.
+- Created `tests/test_llm_router.py` with **10 offline unit tests** (monkeypatched `genai.Client`) verifying ADC mode (`true`/`TRUE`/`True`/` true `, with or without `gemini_api_key`) and AI Studio mode (unset/`""`/`false`/`0`).
+
+### Verification
+- `.venv/bin/pytest -q tests/test_llm_router.py tests/test_gemini_config.py tests/test_team_contracts.py`: **26 passed, 0 failed**.
+- Re-ran Step 3's final check after merging Je's PR #2 (`eval/sentinel_eval.py`): `.venv/bin/python -m eval.sentinel_eval --sample 5 --compare extractive`:
+  - Loaded both `['cases_guardrails.jsonl', 'sentinel_cases.jsonl']` (26 cases total).
+  - **100.0% adversarial escalation rate (18/18)**, **6/6 injection cases caught**, **2/2 PII cases masked**, **0 misses on `cases_guardrails.jsonl`**.
+- Full test suite & ownership check verified before push.
