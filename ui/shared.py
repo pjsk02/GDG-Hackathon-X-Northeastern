@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import html
+import inspect
 import re
 import time
 
@@ -12,6 +13,7 @@ import streamlit as st
 from sentinel import ticket_store
 from sentinel.outage import OutageTracker
 from sentinel.pipeline import SentinelAgent
+from sentinel.smart_queue import SmartQueue
 from sentinel.ticket_store import TicketRecord
 from shared.contracts import SentinelResult
 
@@ -66,6 +68,37 @@ def get_tracker() -> OutageTracker:
     if "tracker" not in st.session_state:
         st.session_state.tracker = OutageTracker()
     return st.session_state.tracker
+
+
+@st.cache_resource
+def get_queue(_agent: SentinelAgent) -> SmartQueue:
+    return SmartQueue(_agent, concurrency=_agent.settings.queue_concurrency)
+
+
+def render_outage_banner(tracker: OutageTracker, *, key_prefix: str = "banner") -> None:
+    """Render the Major Incident banner and 'Group into one incident' button if an outage is active."""
+    alert = tracker.check()
+    if not alert:
+        return
+    st.markdown(
+        f"<div style='background:#b91c1c;color:white;padding:12px 16px;border-radius:8px;"
+        f"font-weight:700;font-size:16px;margin-bottom:8px'>🚨 {html.escape(alert.headline)}</div>",
+        unsafe_allow_html=True,
+    )
+    if alert.subjects:
+        st.caption("Recent matching tickets: " + " | ".join(html.escape(s) for s in alert.subjects[-4:]))
+    if st.button("Group into one incident", key=f"{key_prefix}_group_burst"):
+        try:
+            from sentinel import incidents  # type: ignore[import-not-found]
+        except ImportError:
+            st.info("Incident grouping (`sentinel/incidents.py`) is not merged yet (owner: Rithwik).")
+            return
+        group_fn = getattr(incidents, "group_burst", None)
+        if group_fn is None:
+            st.info("`incidents.group_burst` is not available yet.")
+            return
+        grouped = group_fn(alert)
+        st.success(f"Grouped burst into one incident: {grouped}")
 
 
 def highlight(text: str, quotes: list[str]) -> str:
@@ -174,3 +207,42 @@ def triage_and_store(
     result = agent.triage(clean_subject, body, k=k, provider=provider, fallback=fallback)
     ticket_store.save_result(ticket_id, result)
     return ticket_id, result
+
+
+_FALLBACK_BURST: list[tuple[str, str]] = [
+    ("Billing invoice question", "Can you explain the VAT line on my March invoice?"),
+    ("VPN gateway down - ER", "VPN gateway refuses all connections; clinicians locked out of EMR."),
+    ("Printer jam 3rd floor", "Meeting room printer keeps jamming on double-sided jobs."),
+    ("VPN gateway down - ICU", "ICU remote workstations cannot reach EMR via VPN gateway."),
+    ("Password reset help", "How do I update my MFA phone number in account settings?"),
+    ("VPN gateway down - Lab", "Lab terminals lost VPN connectivity after this morning's patch."),
+    ("Feature request: dark mode", "Would love a dark theme option in the web portal."),
+    ("VPN gateway down - Clinic B", "Telemedicine calls failing because VPN gateway drops all tunnels."),
+    ("Receipt copy needed", "Please send a PDF copy of invoice #4421 for accounting."),
+    ("Export CSV timeout", "Exporting more than 5,000 rows times out after 30 seconds."),
+]
+
+
+def fire_burst(queue: SmartQueue) -> int:
+    """Fire 10 tickets using Rithwik's simulator.fire when available, or a built-in fallback burst."""
+    try:
+        from sentinel import simulator  # type: ignore[import-not-found]
+    except ImportError:
+        count = 0
+        for subj, body in _FALLBACK_BURST:
+            tid = ticket_store.add_ticket(subj, body, source="simulator")
+            queue.submit(tid)
+            count += 1
+        return count
+
+    fire_fn = getattr(simulator, "fire", None)
+    if fire_fn is None:
+        raise AttributeError("sentinel.simulator.fire is missing")
+    params = list(inspect.signature(fire_fn).parameters)
+    if len(params) >= 2:
+        fire_fn(queue, 10)
+    elif len(params) == 1:
+        fire_fn(queue)
+    else:
+        fire_fn()
+    return 10

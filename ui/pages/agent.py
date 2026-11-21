@@ -18,6 +18,7 @@ from ui.shared import (
     get_tracker,
     group_tickets_by_tier,
     highlight,
+    render_outage_banner,
     triage_and_store,
 )
 
@@ -227,13 +228,7 @@ def render_agent_page() -> None:
     fallback = st.session_state.get("llm_fallback", True)
     k = st.session_state.get("sentinel_top_k", agent.settings.sentinel_top_k)
 
-    alert = tracker.check()
-    if alert:
-        st.markdown(
-            f"<div style='background:#b91c1c;color:white;padding:12px 16px;border-radius:8px;"
-            f"font-weight:700;font-size:16px;margin-bottom:12px'>🚨 {html.escape(alert.headline)}</div>",
-            unsafe_allow_html=True,
-        )
+    render_outage_banner(tracker, key_prefix="agent")
 
     # Preset buttons add demo tickets and run SentinelAgent().triage on them
     st.caption("Quick demo presets (adds to board and triages):")

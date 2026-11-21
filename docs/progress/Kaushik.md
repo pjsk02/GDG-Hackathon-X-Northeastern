@@ -23,3 +23,9 @@
 - **Files changed:** `ui/pages/manager.py`, `ui/pages/agent.py`, `tests/test_ui_manager.py`, `docs/progress/Kaushik.md`
 - **Verified:** `uv run --no-sync pytest -q` -> `82 passed in 3.33s` (Manager page renders with/without eval files, Retrain displays status/metrics, and Agent panel saves corrections).
 - **Open issues / notes for teammates:** None.
+
+## Step 5 - Smart queue page and outage banner
+- **Built:** Implemented `ui/pages/queue.py` with "Fire 10 tickets" (`fire_burst` in `ui/shared.py`, calling Rithwik's `simulator.fire` when available with a built-in fallback burst), worker concurrency slider (`SmartQueue.set_concurrency`), and a live `st.fragment(run_every="1s")` view showing waiting / processing / done / throughput from `stats()` and `snapshot()`. Added shared `render_outage_banner` in `ui/shared.py` (with "Group into one incident" calling `incidents.group_burst` when available) and wired it into `ui/pages/agent.py`, `ui/pages/manager.py`, and `ui/pages/queue.py`. Added `tests/test_ui_queue.py`.
+- **Files changed:** `ui/shared.py`, `ui/pages/queue.py`, `ui/pages/agent.py`, `ui/pages/manager.py`, `tests/test_ui_queue.py`, `docs/progress/Kaushik.md`
+- **Verified:** `uv run --no-sync pytest -q` -> `84 passed in 3.46s` (burst raises Major Incident banner, concurrency updates, and "Group into one incident" invokes `incidents.group_burst`).
+- **Open issues / notes for teammates:** None.

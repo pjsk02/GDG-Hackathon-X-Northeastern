@@ -11,7 +11,7 @@ import streamlit as st
 
 from sentinel import feedback, ticket_store
 from sentinel.ticket_store import TicketRecord
-from ui.shared import TIER_META, TIER_ORDER
+from ui.shared import TIER_META, TIER_ORDER, get_tracker, render_outage_banner
 
 
 def compute_ticket_counts(tickets: list[TicketRecord]) -> dict[str, int]:
@@ -62,6 +62,7 @@ def _extract_dial_df(data: Any) -> pd.DataFrame | None:
 def render_manager_page(eval_dir: Path = Path("data/eval")) -> None:
     st.title("📊 Manager Dashboard")
     st.caption("Queue health, tier distribution, evaluation metrics, and challenger retraining.")
+    render_outage_banner(get_tracker(), key_prefix="manager")
 
     tickets = ticket_store.list_tickets()
     counts = compute_ticket_counts(tickets)
