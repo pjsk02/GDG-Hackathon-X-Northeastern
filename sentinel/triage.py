@@ -56,6 +56,13 @@ HEADS = ("type", "queue", "priority")
 CALIBRATION_METHODS = ("temperature", "sigmoid", "isotonic")
 MAX_F1_DROP = 0.005  # a calibrator may not cost more validation Macro-F1 than this
 CALIBRATION_SEED = 0
+# The model reads at most this many characters. The longest kb_train ticket is 1,386 (p99 844), so this never
+# changes a realistic prediction; it bounds the worst case (a 1 MB paste would otherwise cost about 1.5 s).
+MAX_CHARS = 10_000
+
+
+def _clip(texts: list[str]) -> list[str]:
+    return [t if len(t) <= MAX_CHARS else t[:MAX_CHARS] for t in texts]
 
 
 @dataclass
@@ -225,6 +232,7 @@ class TriageModel:
     def features(self, texts: list[str]) -> Any:
         """Sparse [word | char] tf-idf rows. The last single text is cached, so explain() right after
         predict() on the same ticket (what the pipeline does) skips the ~1-2 ms character pass."""
+        texts = _clip(texts)
         if len(texts) != 1:
             return self.vectorizer.transform(texts)
         last = getattr(self, "_last_features", None)
@@ -249,7 +257,7 @@ class TriageModel:
     def predict_batch(self, texts: list[str]) -> list[TriagePrediction]:
         t0 = time.perf_counter()
         per_head = self.predict_proba_heads(texts, calibrated=True)
-        Xl = self.lang_vectorizer.transform(texts)
+        Xl = self.lang_vectorizer.transform(_clip(texts))
         lang_proba = self.lang_head.predict_proba(Xl)
         lang_classes = self.lang_head.classes_
         latency = (time.perf_counter() - t0) * 1000 / max(len(texts), 1)

@@ -29,6 +29,14 @@ The triage confidences are now calibrated (temperature: type T=0.89, queue T=0.8
 `make tune` and `make dial` results computed on the old model's probabilities are stale. Retrain with
 `make sentinel-train` (about 3.5 min) or take my model, then re-run both. Details are in docs/progress/Shishir.md, Step 2.
 
+**Update (Step 5, after reading eval/tune_thresholds.py on main):** without `--model`, `_load_model` fits
+`TriageModel().fit(train_df)` in memory. That model is **uncalibrated**, so the thresholds are tuned on different
+probabilities from the ones the pipeline sees. `make tune` and `make dial` do not pass `--model`, so please
+run `python -m eval.tune_thresholds --model data/sentinel/triage_model.joblib` and
+`python -m eval.safety_dial --model data/sentinel/triage_model.joblib` (or add that flag in the Makefile). Its heads are trained on the train slice only (and only 3
+temperatures are fitted on validation), so validation stays held out. Alternatively, call `.calibrate(val_df)`
+after the in-memory fit.
+
 ## To Je - tests/test_team_contracts.py::test_return_types runs a REAL retrain once corrections exist
 
 **What:** `test_return_types` calls `feedback.retrain_challenger()` twice with the real settings. While

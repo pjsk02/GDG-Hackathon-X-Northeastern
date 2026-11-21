@@ -286,3 +286,117 @@ version cached the train features and copied them per head, and it ran out of me
 **For Je:** `test_return_types` will run a real retrain once corrections exist (request filed). Holdout scores
 after a promotion include the corrections in training; if corrections came from holdout tickets replayed in the
 demo, re-score from a fresh `make sentinel-train`.
+
+## Step 5 - Hardening and handoff (2026-11-21)
+
+**Synced main** (Je steps 1-6, Rithwik steps 1-5, PRs #1 and #2). The merge was clean and touched none of my
+files or the shared files. 198 tests passed after the merge.
+
+**Edge cases.** A probe of the real model on each case (nothing raised):
+
+| ticket | result | notes |
+|---|---|---|
+| empty subject + body, whitespace only | Incident / Technical Support / medium, conf 0.41 | class prior; below the gate's confidence threshold, so it goes to review |
+| `subject=None` or `""` | same as body-only | |
+| 5,000-character German body | Incident / Technical Support / medium, lang de 0.95 | 8 ms |
+| German only ("Rechnung doppelt belastet") | Billing and Payments, lang de 0.93 | why: Rechnung, belastet, Betrag |
+| emoji only | prior answer, no explanation | |
+| emoji + text | Incident / high, conf 0.81 | emoji ignored, words explained |
+| digits only, control characters, HTML/injection text | valid labels, no raise | |
+| 50,000-character paste | was 77 ms | now capped, see below |
+
+- **New `triage.MAX_CHARS = 10_000`.** The model reads at most 10,000 characters, through `features()` and the
+  language head, so predict and explain always see the same text. The longest kb_train ticket is 1,386 characters
+  (p99 844), so the cap never changes a realistic prediction. It bounds a pasted log or email thread, which
+  otherwise grows linearly (about 1.5 s per MB).
+- **`tests/test_triage_edge.py`:** 29 offline tests. Every case above goes through predict and explain (valid
+  distributions; phrases are always text from the ticket). Also: featureless tickets give the prior, German is
+  detected, an empty subject equals body-only, the huge paste is capped and fast, batch equals single, and unicode
+  and emoji corrections round-trip and are learnable.
+
+**Latency** (real model, one ticket at a time as the pipeline calls it; the machine was busy, so single predict
+was about 3x slower than earlier in the day):
+
+| per ticket, 1,000 validation tickets | p50 ms | p95 ms | p99 ms | max ms |
+|---|---|---|---|---|
+| predict() | 4.84 | 7.57 | 8.72 | 9.92 |
+| explain() after predict | 1.31 | 2.17 | 2.46 | 2.99 |
+| predict + explain (triage stage) | 6.22 | 9.56 | 10.82 | 12.16 |
+
+One-off costs: model load 0.5 s, first predict 9 ms, first explain 46 ms (it builds the per-model word arrays
+once). Batch throughput is 1.77 ms per ticket.
+
+| pipeline, 100 other validation tickets, draft=False | p50 ms | p95 ms |
+|---|---|---|
+| triage_ms | 7.2 | 10.6 |
+| retrieval_ms | 37.0 | 57.7 |
+| total (wall) | 47.4 | 68.5 |
+
+Explanations were non-empty on 100 of 100 tickets, with 0 pipeline errors. Triage is about 15% of a no-draft
+ticket; with Gemini or Gemma drafting it is under 0.1%.
+
+**Verified:** `pytest -q` -> 227 passed.
+
+**Not done:** the optional Keras-on-embeddings comparison row. It was only for "if everything else is
+shipped", and Steps 1-5 come first. Happy to add it if Je wants it for the README.
+
+## Handoff (for Kaushik, Je and anyone calling my modules)
+
+**What the pipeline already gets with no changes:** calibrated `triage.type/queue/priority_confidence`, and
+`result.explanations = {"type": [...], "queue": [...], "priority": [...]}`. Each list holds up to 3 phrases in the
+ticket's own casing and may be empty; an empty or emoji-only ticket gives all-empty lists.
+
+**Agent panel, "Correct labels" (Kaushik, ui/pages/agent.py):**
+
+```python
+from sentinel import feedback, triage
+from shared.contracts import LabelCorrection
+
+labels = triage.get_model().classes[head]          # offer these in a selectbox (request filed)
+choice = st.selectbox(f"Corrected {head}", labels, index=labels.index(predicted_val))
+if st.form_submit_button("Save correction") and choice != predicted_val:
+    feedback.record_correction(LabelCorrection(
+        ticket_id=rec.ticket_id,
+        text=f"{rec.subject or ''}\n{rec.body}".strip(),   # exactly what the classifier saw
+        head=head, predicted=predicted_val, corrected=choice))
+```
+
+`record_correction` appends one JSON line to `settings.corrections_path` (data/sentinel/corrections.jsonl). There
+is no lock: that is fine for a handful of agents saving by hand. A corrupt line from a rare simultaneous write is
+skipped by `list_corrections`, not fatal.
+
+**Manager page, Retrain (Kaushik, ui/pages/manager.py):** the current code already works. It would read better
+with:
+
+```python
+with st.spinner("Training a challenger on the corrections and scoring it on validation (about 35 s)..."):
+    out = feedback.retrain_challenger()
+st.markdown({"promoted": "✅ **Promoted**", "kept_champion": "🛡️ **Kept the current model**",
+             "error": "⚠️ **Retrain failed**"}.get(out["status"], out["status"]))
+st.info(out["message"])                              # always a readable sentence
+if out["champion"] and out["challenger"]:            # both None when nothing was trained
+    st.dataframe(pd.DataFrame({"current": out["champion"], "challenger": out["challenger"]}))
+st.caption(f"{out['corrections_used']} correction(s) used, {out['corrections_skipped']} skipped "
+           f"{out['skipped_reasons'] or ''}")
+```
+
+- `out["cached"] is True` means no new corrections since the last click and nothing was trained. The earlier
+  verdict is in `out["last_result"]`.
+- A promotion takes effect in the running app immediately: the agent's model object is updated in place, so
+  there is nothing to reload.
+- Metrics are on the validation slice (2,287 tickets), never the holdout. Label them "validation", not "test".
+- Only one retrain runs at a time. A second concurrent click gets `status: "error"`, "already running".
+
+**Rollback:** copy `data/sentinel/triage_model.backup-<newest>.joblib` over `data/sentinel/triage_model.joblib`
+and restart. The newest 3 backups are kept.
+
+**For Je:**
+- `make sentinel-train` rebuilds the calibrated model (about 3.5 min) and writes `data/eval/calibration.json` and
+  `.png` (holdout). `python -m sentinel.calibration --split val` writes the validation version.
+- `eval/tune_thresholds.py` without `--model` fits a new **uncalibrated** model in memory, so the tuned thresholds
+  would not match the calibrated probabilities the pipeline uses, and `make tune` / `make dial` do not pass the
+  flag. Run `python -m eval.tune_thresholds --model data/sentinel/triage_model.joblib` and
+  `python -m eval.safety_dial --model data/sentinel/triage_model.joblib`: the heads are train-only, so validation
+  stays held out. Request updated.
+- Open requests: the ownership-script first-letter bug, isolating `test_return_types` from real corrections, and
+  re-tuning against the calibrated model.
