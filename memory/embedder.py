@@ -2,9 +2,14 @@
 
     hash    offline bag-of-words hashing. Zero setup; fine for tests, weak for semantics.
     ollama  any Ollama embedding model (default: embeddinggemma-2:570m). `ollama pull embeddinggemma-2:570m`.
+    gemini  Google AI Studio embeddings (GEMINI_EMBED_MODEL, default gemini-embedding-001). Needs GEMINI_API_KEY.
+
+Contract (owner: Rithwik, role C): `get_embedder(settings) -> Embedder`; every embedder has `name` (vectors are
+tagged with it in the store) and `embed(texts, *, is_query=False) -> np.ndarray` of unit-normalized float32 rows.
 """
 
 import hashlib
+import importlib
 import re
 import time
 from typing import Protocol
@@ -87,7 +92,88 @@ class OllamaEmbedder:
         return _normalize(np.asarray(vecs, dtype=np.float32))
 
 
+class GeminiEmbedder:
+    """Gemini embeddings via the google-genai SDK, with retrieval task types and retry on 429/5xx."""
+
+    def __init__(
+        self,
+        api_key: str | None,
+        model: str = "gemini-embedding-001",
+        batch_size: int = 64,
+        timeout: float = 30.0,
+        max_retries: int = 6,
+        backoff_s: float = 2.0,
+        max_backoff_s: float = 60.0,
+    ):
+        if not api_key:
+            raise ValueError("EMBED_PROVIDER=gemini needs GEMINI_API_KEY in .env")
+        self.api_key, self.model, self.batch_size, self.timeout = api_key, model, batch_size, timeout
+        self.max_retries, self.backoff_s, self.max_backoff_s = max_retries, backoff_s, max_backoff_s
+        self.name = f"gemini-{model}"
+        self._client = None  # created on first use; tests inject a fake
+        self._sleep = time.sleep
+
+    def _get_client(self):
+        if self._client is None:
+            try:
+                from google import genai
+                from google.genai import types
+            except ImportError as e:
+                raise RuntimeError('google-genai not installed: pip install -e ".[gemini]"') from e
+            self._client = genai.Client(
+                api_key=self.api_key, http_options=types.HttpOptions(timeout=int(self.timeout * 1000))  # milliseconds
+            )
+        return self._client
+
+    @staticmethod
+    def _retryable(exc: Exception) -> bool:
+        code = getattr(exc, "code", None)  # google.genai.errors.APIError carries the HTTP status here
+        if isinstance(code, int):
+            return code == 429 or code >= 500
+        # Network trouble (timeouts, dropped connections) never reaches the API, so it has no status code.
+        # google-genai 3.x ships on httpx2; older versions use httpx. Accept either.
+        for mod in ("httpx2", "httpx"):
+            try:
+                transport_error = importlib.import_module(mod).TransportError
+            except (ImportError, AttributeError):
+                continue
+            if isinstance(exc, transport_error):
+                return True
+        return False
+
+    def _embed_batch(self, batch: list[str], task_type: str) -> list[list[float]]:
+        from google.genai import types
+
+        client = self._get_client()
+        config = types.EmbedContentConfig(task_type=task_type)
+        for attempt in range(self.max_retries + 1):
+            try:
+                resp = client.models.embed_content(model=self.model, contents=batch, config=config)
+                if len(resp.embeddings) != len(batch):
+                    raise RuntimeError(f"Gemini returned {len(resp.embeddings)} embeddings for {len(batch)} texts")
+                return [e.values for e in resp.embeddings]
+            except Exception as e:
+                if attempt == self.max_retries or not self._retryable(e):
+                    raise
+                self._sleep(min(self.max_backoff_s, self.backoff_s * 2**attempt))
+        raise AssertionError("unreachable")
+
+    def embed(self, texts: list[str], *, is_query: bool = False) -> np.ndarray:
+        if not texts:
+            return np.zeros((0, 0), dtype=np.float32)
+        task_type = "RETRIEVAL_QUERY" if is_query else "RETRIEVAL_DOCUMENT"
+        vecs: list[list[float]] = []
+        for i in range(0, len(texts), self.batch_size):
+            vecs.extend(self._embed_batch(texts[i : i + self.batch_size], task_type))
+        return _normalize(np.asarray(vecs, dtype=np.float32))
+
+
 def get_embedder(settings: Settings) -> Embedder:
+    if settings.embed_provider == "gemini":
+        return GeminiEmbedder(
+            settings.gemini_api_key, settings.gemini_embed_model, settings.gemini_embed_batch,
+            settings.gemini_timeout_s,
+        )
     if settings.embed_provider == "ollama":
         return OllamaEmbedder(
             settings.ollama_url, settings.embed_model, settings.request_timeout_s,
