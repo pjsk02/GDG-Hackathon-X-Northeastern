@@ -11,3 +11,9 @@
 - **Files changed:** `ui/sentinel_console.py`, `ui/shared.py`, `ui/pages/agent.py`, `ui/pages/customer.py`, `ui/pages/manager.py`, `ui/pages/queue.py`, `tests/test_ui_agent.py`, `docs/progress/Kaushik.md`
 - **Verified:** `uv run --no-sync pytest -q` -> `72 passed in 3.26s` (including Streamlit `AppTest` preset -> board -> side panel test in `tests/test_ui_agent.py`).
 - **Open issues / notes for teammates:** None.
+
+## Step 3 - Customer page and API roles
+- **Built:** Implemented `ui/pages/customer.py` with an optional-subject ticket submission form and "My tickets" status list (`Received` / `In progress` / `Replied`), hiding all internal fields (confidence, precedents, reasons, masked text). Added `customer_status_label` in `ui/shared.py`. Added `POST /triage` in `api/main.py` accepting `TicketInput` and `X-Role` (`customer` | `agent` | `manager`), returning `CustomerTriageResponse` (status + approved reply only) for customers and full `SentinelResult` for agents/managers. Added `tests/test_api.py` and `tests/test_ui_customer.py`.
+- **Files changed:** `ui/shared.py`, `ui/pages/customer.py`, `api/main.py`, `tests/test_api.py`, `tests/test_ui_customer.py`, `docs/progress/Kaushik.md`
+- **Verified:** `uv run --no-sync pytest -q` -> `78 passed in 2.88s` (all API TestClient and Customer AppTest checks pass).
+- **Open issues / notes for teammates:** None.

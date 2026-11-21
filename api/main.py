@@ -6,9 +6,9 @@ import threading
 from contextlib import asynccontextmanager
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -16,7 +16,9 @@ from pydantic import BaseModel
 
 from agent.pipeline import Agent
 from api import a2ui
-from shared.contracts import AgentAnswer, AskRequest, RetrievedChunk
+from sentinel import ticket_store
+from sentinel.pipeline import SentinelAgent
+from shared.contracts import AgentAnswer, AskRequest, RetrievedChunk, SentinelResult, TicketInput
 
 A2UI_PAGE = Path(__file__).parent / "static" / "a2ui.html"
 PROVIDERS = ["extractive", "ollama", "gemini"]
@@ -28,6 +30,11 @@ WARM_UP: dict[str, str] = {}  # component -> "pending" | "ok" | error; shown on 
 @lru_cache
 def get_agent() -> Agent:
     return Agent()
+
+
+@lru_cache
+def get_sentinel_agent() -> SentinelAgent:
+    return SentinelAgent()
 
 
 def _warm_up() -> None:
@@ -83,6 +90,38 @@ def health() -> dict:
 @app.post("/ask", response_model=AgentAnswer)
 def ask(req: AskRequest) -> AgentAnswer:
     return get_agent().ask(req.question, k=req.k, provider=req.provider, fallback=req.fallback)
+
+
+class CustomerTriageResponse(BaseModel):
+    """Customer-safe triage response: status and approved reply only."""
+
+    ticket_id: str
+    status: Literal["Received", "In progress", "Replied"]
+    reply: str | None = None
+
+
+@app.post("/triage", response_model=SentinelResult | CustomerTriageResponse)
+def triage_ticket(
+    req: TicketInput,
+    x_role: str = Header(default="customer", alias="X-Role"),
+) -> SentinelResult | CustomerTriageResponse:
+    role = x_role.strip().lower()
+    if role not in ("customer", "agent", "manager"):
+        raise HTTPException(422, f"Invalid X-Role {x_role!r}; expected customer, agent, or manager")
+
+    agent = get_sentinel_agent()
+    result = agent.triage(req.subject, req.body, k=req.k, provider=req.provider, fallback=req.fallback)
+    ticket_id = ticket_store.add_ticket(req.subject, req.body, source="api")
+    ticket_store.save_result(ticket_id, result)
+
+    if role == "customer":
+        approved = result.tier == "AUTO_DRAFT" and result.grounded and bool(result.draft_reply)
+        if approved:
+            ticket_store.set_status(ticket_id, "replied")
+            return CustomerTriageResponse(ticket_id=ticket_id, status="Replied", reply=result.draft_reply)
+        return CustomerTriageResponse(ticket_id=ticket_id, status="In progress", reply=None)
+
+    return result
 
 
 @app.get("/search", response_model=list[RetrievedChunk])

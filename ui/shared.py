@@ -102,6 +102,17 @@ def format_waiting_time(created_at: float, now: float | None = None) -> str:
     return f"{hours}h {rem}m" if rem else f"{hours}h"
 
 
+def customer_status_label(status: str) -> str:
+    """Map internal ticket_store statuses to customer-facing labels."""
+    if status in ("new", "queued", "processing"):
+        return "Received"
+    if status == "triaged":
+        return "In progress"
+    if status in ("replied", "closed"):
+        return "Replied"
+    return "Received"
+
+
 def ticket_tier_key(rec: TicketRecord) -> str:
     """Return the board group key for a TicketRecord."""
     if rec.status in ("replied", "closed"):
