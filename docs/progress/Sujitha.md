@@ -101,3 +101,40 @@ GEMINI_THINKING_LEVEL=low
 ### Open issues / notes for teammates
 - Je (Role A): `eval/cases_guardrails.jsonl` is ready to be loaded alongside `eval/sentinel_cases.jsonl` in `eval/sentinel_eval.py` (Step 4).
 - Kaushik (Role E): `sentinel/pipeline.py` already populates `result.injection_flags` and adds `R7 prompt injection: <hit>` reasons for three-tier routing (`R7 -> PAGE_ONCALL`).
+
+## Step 4: Writer upgrades
+
+### What was built
+- Upgraded `SYSTEM_PROMPT` in `sentinel/writer.py` while keeping `extractive_draft`, `build_user_prompt`, `verify_citations`, and all constants/signatures unchanged:
+  - **Rule 2 (commitment refusals):** Strengthened so any refund, credit, discount, SLA guarantee, deadline, compensation, contract cancellation, or legal request not backed verbatim by a precedent's Resolution must never be promised or implied approved, must never invent unbacked numbers/prices/percentages/durations/dates, must state that a human colleague will follow up, and must refuse (`refused=true` + `refusal_reason`) when no safe precedent-backed answer exists.
+  - **Rule 4 (formal German):** Strengthened so German replies (`reply_language="de"`) use natural, polite, formal German (`"Sie"`, never informal `"du"`), while preserving citations-first ordering and verbatim original-language `evidence_quote`s.
+  - **Rule 6 (`briefing`):** Added explicit requirement that `briefing` is always filled (even when `refused=true`) as one concise English sentence of at most 25 words summarizing what the incoming ticket is about for the agent, with no advice or recommendations.
+- Created `tests/test_writer.py` with **30 offline unit tests** verifying `SYSTEM_PROMPT` rules, unchanged `extractive_draft` EN/DE frames & citations, `build_user_prompt`, and `verify_citations`.
+
+### 20-ticket validation benchmark (`extractive` vs `gemini`)
+Measured on 20 tickets from the validation slice (`sentinel.dataset.load_train_val_test()`, 10 EN + 10 DE, `random_state=42`) against a clean `train`-only in-memory hash index (20,582 tickets, zero validation self-leakage, holdout untouched), with `fallback=False` and `GEMINI_MODEL=gemini-3.5-flash-lite` (`GEMINI_THINKING_LEVEL=low`):
+
+| Metric | `extractive` | `gemini` (`gemini-3.5-flash-lite`) |
+|---|---|---|
+| Tickets (EN / DE) | 20 (10 / 10) | 20 (10 / 10) |
+| Grounded rate | **20/20 (100.0%)** | **18/20 (90.0%)** *(18/19 = 94.7% of non-error calls)* |
+| Refusal rate | **0/20 (0.0%)** | **1/20 (5.0%)** *(TKT-22564 refused cleanly)* |
+| Grounded or refused | 20/20 (100.0%) | 19/20 (95.0%) *(1 transient HTTP 503 on TKT-20790)* |
+| Verified / rejected citations | 20 / 0 (0.0% rej) | **32 / 0 (0.0% rej)** |
+| `check_claims` guard findings | 0 / 20 | **0 / 20** |
+| Briefing <= 25 words | 0 / 20 (no LLM) | **19 / 19 (100% of successful calls; 12–22 words)** |
+| Informal German `"du"` | 0 / 10 | **0 / 8** |
+| Generation latency p50 / mean | 0.0 ms / 0.0 ms | **1299.8 ms / 3050.3 ms** |
+| Total latency p50 / mean | 4.2 ms / 6.8 ms | **1313.2 ms / 3064.2 ms** |
+
+### Files changed
+- `sentinel/writer.py`
+- `tests/test_writer.py`
+- `docs/progress/Sujitha.md`
+
+### Verification
+- `.venv/bin/pytest -q tests/test_writer.py`: **30 passed, 0 failed**.
+- Full test suite & ownership check verified via `test-runner` and `ownership-reviewer`.
+
+### Open issues / notes for teammates
+- Even with `fallback=False`, Gemini returned 0 rejected citations (32/32 verified verbatim) and 0 `check_claims` violations across 19/19 successful calls, with 100% `briefing` compliance (12–22 words, including on the refused ticket). In production (`fallback=True`), the single transient 503 spike automatically falls back to `extractive` cleanly.
