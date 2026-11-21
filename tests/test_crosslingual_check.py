@@ -79,3 +79,17 @@ def test_empty_index_or_no_queries(tmp_path):
     assert crosslingual_stats(empty, _meta(), KB)["queries"] == 0
     store = _store(tmp_path, ConceptEmbedder())
     assert crosslingual_stats(store, _meta(), KB.iloc[0:0])["queries"] == 0
+
+
+def test_index_path_reuses_the_demo_index_only_for_its_own_embedder(tmp_path):
+    from eval.crosslingual_check import EVAL_DIR, index_path
+    from shared.settings import Settings
+
+    demo = tmp_path / "sentinel.sqlite"
+    s = Settings(_env_file=None, sentinel_memory_path=demo)
+    assert index_path("ollama", s, "ollama-embeddinggemma") == EVAL_DIR / "crosslingual_ollama.sqlite"
+    assert not demo.exists()  # looking never creates the demo file
+
+    build_index(VectorStore(demo, ConceptEmbedder()), KB)  # the demo index holds concept-3 vectors
+    assert index_path("concept", s, "concept-3") == demo
+    assert index_path("gemini", s, "gemini-gemini-embedding-001") == EVAL_DIR / "crosslingual_gemini.sqlite"

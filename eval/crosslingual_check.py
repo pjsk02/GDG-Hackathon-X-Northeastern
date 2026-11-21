@@ -11,11 +11,12 @@ English precedents for the same problem. The holdout is never read.
 
 Each embedder needs its own index (chunk ids are ticket ids, so one file holds one embedder):
 
-    gemini  data/sentinel.sqlite, the demo index (EMBED_PROVIDER=gemini make sentinel-index)
-    other   data/eval/crosslingual_<provider>.sqlite, built here on demand (hash takes seconds)
+    the demo index data/sentinel.sqlite, if it already holds this embedder's vectors (e.g. Je's EmbeddingGemma
+    index for ollama); otherwise data/eval/crosslingual_<provider>.sqlite, built here on demand (always for hash,
+    with --build for the others). The demo index is never written to.
 
     python -m eval.crosslingual_check                     # hash vs gemini
-    python -m eval.crosslingual_check --providers hash
+    python -m eval.crosslingual_check --providers hash,ollama   # on the demo laptop: hash vs EmbeddingGemma
     python -m eval.crosslingual_check --limit 200         # first 200 German validation tickets
 """
 
@@ -23,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sqlite3
 import time
 from pathlib import Path
 
@@ -79,8 +81,18 @@ def crosslingual_stats(
     }
 
 
-def index_path(provider: str, settings: Settings) -> Path:
-    return settings.sentinel_memory_path if provider == "gemini" else EVAL_DIR / f"crosslingual_{provider}.sqlite"
+def index_path(provider: str, settings: Settings, embedder_name: str) -> Path:
+    """The demo index when it already has this embedder's vectors, else this script's own file for the provider."""
+    demo = Path(settings.sentinel_memory_path)
+    if demo.exists():
+        with sqlite3.connect(demo) as db:
+            try:
+                has = db.execute("SELECT 1 FROM chunks WHERE embedder = ? LIMIT 1", (embedder_name,)).fetchone()
+            except sqlite3.OperationalError:  # not an index file
+                has = None
+        if has:
+            return demo
+    return EVAL_DIR / f"crosslingual_{provider}.sqlite"
 
 
 def build_index(store: VectorStore, kb: pd.DataFrame, batch: int = 256) -> int:
@@ -102,20 +114,21 @@ def run(providers: list[str], k: int = 5, limit: int | None = None, build: bool 
     results: dict[str, dict] = {}
     for provider in providers:
         settings = get_settings().model_copy(update={"embed_provider": provider})
-        path = index_path(provider, settings)
         try:
-            store = VectorStore(path, get_embedder(settings))
+            embedder = get_embedder(settings)
         except ValueError as e:  # e.g. gemini without a key
             print(f"{provider}: skipped ({e})")
             continue
+        path = index_path(provider, settings, embedder.name)
+        store = VectorStore(path, embedder)
         if store.count() == 0:
             if provider == "hash" or build:
                 path.parent.mkdir(parents=True, exist_ok=True)
                 print(f"{provider}: building index {path} ({len(kb):,} tickets)...", flush=True)
                 build_index(store, kb)
             else:
-                print(f"{provider}: skipped (no {store.embedder.name} vectors in {path}; "
-                      f"build with EMBED_PROVIDER={provider} make sentinel-index, or pass --build)")
+                print(f"{provider}: skipped (no {store.embedder.name} vectors in {settings.sentinel_memory_path} "
+                      f"or {path}; pass --build to embed kb_train into {path})")
                 continue
         t0 = time.perf_counter()
         stats = crosslingual_stats(store, kb_meta, german, k=k)

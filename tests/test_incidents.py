@@ -72,6 +72,20 @@ def test_links_by_subject_when_the_alert_has_no_ids(tickets):
     assert inc.ticket_ids == ["SD-1003", "SD-1006"]
 
 
+def test_subject_fallback_ignores_an_earlier_burst_with_the_same_subjects():
+    # The demo burst fired twice: same subjects, the alert is about the second burst.
+    old = [_ticket(f"SD-10{i}", float(i), [_precedent("TKT-1")], subject=f"VPN down {i}") for i in range(3)]
+    new = [_ticket(f"SD-20{i}", 100.0 + i, [_precedent("TKT-1")], subject=f"VPN down {i}") for i in range(3)]
+    inc = group_burst(_alert(subjects=[f"VPN down {i}" for i in range(3)]), old + new)
+    assert inc.ticket_ids == ["SD-200", "SD-201", "SD-202"]
+
+
+def test_subject_fallback_keeps_repeated_subjects():
+    tickets = [_ticket(f"SD-10{i}", float(i), [_precedent("TKT-1")], subject="VPN down") for i in range(4)]
+    inc = group_burst(_alert(subjects=["VPN down", "VPN down", "VPN down"]), tickets)
+    assert inc.ticket_ids == ["SD-101", "SD-102", "SD-103"]
+
+
 def test_no_matching_tickets_is_an_error(tickets):
     with pytest.raises(ValueError):
         group_burst(_alert(ids=["SD-9999"]), tickets)
