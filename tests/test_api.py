@@ -17,14 +17,14 @@ class _FakeSentinelAgent:
         return self._result.model_copy(deep=True)
 
 
-def _sample_result(*, tier: str = "AUTO_DRAFT", grounded: bool = True, draft_reply: str | None = "Restart VPN.") -> SentinelResult:
+def _sample_result(*, tier: str = "AUTO_DRAFT", ticket_type: str = "Request", grounded: bool = True, draft_reply: str | None = "Restart VPN.") -> SentinelResult:
     return SentinelResult(
         subject="VPN issue",
         body="Cannot connect. Email: alice@example.com",
         detected_language="en",
         language_confidence=0.99,
         triage=TriageLabels(
-            type="Request",
+            type=ticket_type,
             queue="Technical Support",
             priority="low",
             type_confidence=0.92,
@@ -112,3 +112,43 @@ def test_triage_invalid_role_returns_422(monkeypatch):
     client = TestClient(api_main.app)
     resp = client.post("/triage", json={"body": "Help"}, headers={"X-Role": "admin"})
     assert resp.status_code == 422
+
+
+def test_tickets_list_action_and_outage_endpoints(monkeypatch):
+    ticket_store.reset()
+    api_main._OUTAGE_TRACKER.reset()
+    monkeypatch.setattr(api_main, "get_sentinel_agent", lambda: _FakeSentinelAgent(_sample_result(tier="PAGE_ONCALL", ticket_type="Incident")))
+    client = TestClient(api_main.app)
+
+    # Submit 3 matching outage tickets as customer
+    for _ in range(3):
+        r = client.post("/triage", json={"subject": "VPN down", "body": "VPN refuses"}, headers={"X-Role": "customer"})
+        assert r.status_code == 200
+
+    # Customer list hides internal fields
+    cust_list = client.get("/tickets", headers={"X-Role": "customer"}).json()
+    assert len(cust_list) == 3
+    assert "triage" not in cust_list[0]
+    assert cust_list[0]["status"] == "In progress"
+
+    # Agent list includes full result
+    agent_list = client.get("/tickets", headers={"X-Role": "agent"}).json()
+    assert len(agent_list) == 3
+    assert agent_list[0]["result"]["tier"] == "PAGE_ONCALL"
+
+    # Outage endpoint reports active burst
+    outage = client.get("/outage").json()
+    assert outage["active"] is True
+    assert outage["ticket_count"] == 3
+
+    # Action endpoint closes ticket
+    tid = agent_list[0]["ticket_id"]
+    act = client.post(f"/tickets/{tid}/action", json={"status": "closed"}).json()
+    assert act["status"] == "closed"
+
+    # /desk, /user, /admin serve the live frontend HTML
+    assert client.get("/desk").status_code == 200
+    assert client.get("/user").status_code == 200
+    assert client.get("/admin").status_code == 200
+    ticket_store.reset()
+    api_main._OUTAGE_TRACKER.reset()

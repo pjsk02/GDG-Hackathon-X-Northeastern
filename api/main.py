@@ -17,14 +17,17 @@ from pydantic import BaseModel
 from agent.pipeline import Agent
 from api import a2ui
 from sentinel import ticket_store
+from sentinel.outage import OutageTracker
 from sentinel.pipeline import SentinelAgent
 from shared.contracts import AgentAnswer, AskRequest, RetrievedChunk, SentinelResult, TicketInput
 
 A2UI_PAGE = Path(__file__).parent / "static" / "a2ui.html"
+SENTINELDESK_PAGE = Path(__file__).parent / "static" / "sentineldesk.html"
 PROVIDERS = ["extractive", "ollama", "gemini"]
 
 log = logging.getLogger("uvicorn.error")
 WARM_UP: dict[str, str] = {}  # component -> "pending" | "ok" | error; shown on /health
+_OUTAGE_TRACKER = OutageTracker()
 
 
 @lru_cache
@@ -34,7 +37,25 @@ def get_agent() -> Agent:
 
 @lru_cache
 def get_sentinel_agent() -> SentinelAgent:
-    return SentinelAgent()
+    try:
+        agent = SentinelAgent()
+        agent.warm_up()
+        return agent
+    except FileNotFoundError:
+        from agent.llm_router import LLMRouter
+        from memory.embedder import HashEmbedder
+        from memory.store import VectorStore
+        from shared.settings import Settings
+        from ui.shared import _DemoTriageModel
+
+        settings = Settings(llm_provider="extractive", llm_fallback="", warm_up=False)
+        store = VectorStore(":memory:", HashEmbedder())
+        return SentinelAgent(
+            settings=settings,
+            store=store,
+            router=LLMRouter(settings),
+            triage_model=_DemoTriageModel(),
+        )
 
 
 def _warm_up() -> None:
@@ -113,6 +134,7 @@ def triage_ticket(
     result = agent.triage(req.subject, req.body, k=req.k, provider=req.provider, fallback=req.fallback)
     ticket_id = ticket_store.add_ticket(req.subject, req.body, source="api")
     ticket_store.save_result(ticket_id, result)
+    _OUTAGE_TRACKER.observe(result)
 
     if role == "customer":
         approved = result.tier == "AUTO_DRAFT" and result.grounded and bool(result.draft_reply)
@@ -122,6 +144,75 @@ def triage_ticket(
         return CustomerTriageResponse(ticket_id=ticket_id, status="In progress", reply=None)
 
     return result
+
+
+@app.get("/tickets")
+def list_stored_tickets(x_role: str = Header(default="customer", alias="X-Role")) -> list[dict[str, Any]]:
+    """List tickets from ticket_store, filtered by caller role."""
+    role = x_role.strip().lower()
+    if role not in ("customer", "agent", "manager"):
+        raise HTTPException(422, f"Invalid X-Role {x_role!r}; expected customer, agent, or manager")
+    records = ticket_store.list_tickets()
+    if role == "customer":
+        out: list[dict[str, Any]] = []
+        for r in records:
+            if r.status in ("new", "queued", "processing"):
+                c_status = "Received"
+            elif r.status == "triaged":
+                c_status = "In progress"
+            else:
+                c_status = "Replied"
+            reply = r.result.draft_reply if (c_status == "Replied" and r.result) else None
+            out.append(
+                {
+                    "ticket_id": r.ticket_id,
+                    "subject": r.subject,
+                    "body": r.body,
+                    "status": c_status,
+                    "created_at": r.created_at,
+                    "reply": reply,
+                }
+            )
+        return out
+    return [r.model_dump() for r in records]
+
+
+class TicketActionRequest(BaseModel):
+    status: Literal["replied", "closed"]
+
+
+@app.post("/tickets/{ticket_id}/action")
+def update_ticket_status(ticket_id: str, req: TicketActionRequest) -> dict[str, Any]:
+    """Approve/close a ticket in ticket_store."""
+    rec = ticket_store.get_ticket(ticket_id)
+    if rec is None:
+        raise HTTPException(404, f"Ticket {ticket_id!r} not found")
+    ticket_store.set_status(ticket_id, req.status)
+    updated = ticket_store.get_ticket(ticket_id)
+    return updated.model_dump() if updated else {"ticket_id": ticket_id, "status": req.status}
+
+
+@app.get("/outage")
+def get_outage_status() -> dict[str, Any]:
+    """Return active OutageTracker burst alert if present."""
+    alert = _OUTAGE_TRACKER.check()
+    if not alert:
+        return {"active": False}
+    return {
+        "active": True,
+        "headline": alert.headline,
+        "ticket_count": alert.ticket_count,
+        "shared_precedents": alert.shared_precedents,
+        "subjects": alert.subjects,
+        "since_seconds": alert.since_seconds,
+    }
+
+
+@app.get("/desk", include_in_schema=False)
+@app.get("/user", include_in_schema=False)
+@app.get("/admin", include_in_schema=False)
+def sentineldesk_page() -> FileResponse:
+    return FileResponse(SENTINELDESK_PAGE)
 
 
 @app.get("/search", response_model=list[RetrievedChunk])

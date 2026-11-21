@@ -15,7 +15,9 @@ from sentinel.outage import OutageTracker
 from sentinel.pipeline import SentinelAgent
 from sentinel.smart_queue import SmartQueue
 from sentinel.ticket_store import TicketRecord
+from sentinel.triage import HeadPrediction, TriagePrediction
 from shared.contracts import SentinelResult
+from shared.settings import Settings
 
 TIER_META: dict[str, tuple[str, str, str]] = {
     "PAGE_ONCALL": ("Page on-call", "🔴", "#dc2626"),
@@ -57,11 +59,71 @@ PRESETS: dict[str, tuple[str, str]] = {
 }
 
 
+class _DemoTriageModel:
+    """Lightweight keyword-based fallback when data/sentinel/triage_model.joblib is not trained yet."""
+
+    trained_on = 0
+
+    def predict(self, subject: str | None, body: str) -> TriagePrediction:
+        text = f"{subject or ''} {body}".lower()
+        is_de = any(w in text for w in ("rechnung", "zugriff", "bitte", "sehr geehrte", "anmelden"))
+        lang = "de" if is_de else "en"
+
+        def head(label: str, conf: float) -> HeadPrediction:
+            return HeadPrediction(label=label, confidence=conf, probabilities={label: conf})
+
+        if any(w in text for w in ("vpn", "down", "outage", "keinen zugriff", "kein zugriff", "emr", "locked out")):
+            return TriagePrediction(
+                type=head("Incident", 0.91),
+                queue=head("Technical Support", 0.87),
+                priority=head("high", 0.92),
+                language=lang,
+                language_confidence=0.95,
+            )
+        if any(w in text for w in ("refund", "sla", "lawyer", "compensation", "5000")):
+            return TriagePrediction(
+                type=head("Problem", 0.82),
+                queue=head("Billing and Payments", 0.80),
+                priority=head("medium", 0.72),
+                language=lang,
+                language_confidence=0.95,
+            )
+        if any(w in text for w in ("rechnung", "invoice", "billing")):
+            return TriagePrediction(
+                type=head("Request", 0.86),
+                queue=head("Billing and Payments", 0.88),
+                priority=head("low", 0.84),
+                language=lang,
+                language_confidence=0.95,
+            )
+        return TriagePrediction(
+            type=head("Request", 0.48),
+            queue=head("Customer Service", 0.52),
+            priority=head("low", 0.50),
+            language=lang,
+            language_confidence=0.90,
+        )
+
+
 @st.cache_resource(show_spinner="Loading triage model, index and LLM…")
 def get_agent() -> SentinelAgent:
-    agent = SentinelAgent()
-    agent.warm_up()
-    return agent
+    try:
+        agent = SentinelAgent()
+        agent.warm_up()
+        return agent
+    except FileNotFoundError:
+        from agent.llm_router import LLMRouter
+        from memory.embedder import HashEmbedder
+        from memory.store import VectorStore
+
+        settings = Settings(llm_provider="extractive", llm_fallback="", warm_up=False)
+        store = VectorStore(":memory:", HashEmbedder())
+        return SentinelAgent(
+            settings=settings,
+            store=store,
+            router=LLMRouter(settings),
+            triage_model=_DemoTriageModel(),
+        )
 
 
 def get_tracker() -> OutageTracker:

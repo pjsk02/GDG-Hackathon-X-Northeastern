@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>SentinelDesk</title>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-[#0a0e16] text-slate-200 antialiased m-0 p-0 text-sm min-h-screen">
+
+<!-- ============ LOGIN ============ -->
+<section id="v-login" class="min-h-screen flex items-center justify-center p-6 bg-[radial-gradient(#1e2330_1px,transparent_1px)] [background-size:20px_20px]">
+  <div class="w-full max-w-lg space-y-6">
+    <div class="text-center space-y-2">
+      <div class="mx-auto w-11 h-11 rounded-xl bg-indigo-600/20 border border-indigo-500/40 flex items-center justify-center font-bold text-indigo-400">SD</div>
+      <h1 class="text-2xl font-bold text-white">SentinelDesk</h1>
+      <p class="text-slate-400 text-xs">Choose your view (wired live to <span class="font-mono">POST /triage</span> &amp; <span class="font-mono">ticket_store</span>)</p>
+    </div>
+    <div class="grid grid-cols-2 gap-4">
+      <button onclick="login('user')" class="text-left p-5 rounded-2xl bg-[#0f131c] border border-[#1e2330] hover:border-indigo-500 transition space-y-2">
+        <div class="text-2xl">🙋</div>
+        <div class="font-semibold text-white">I need help</div>
+        <div class="text-xs text-slate-400">Raise a ticket and track ongoing &amp; previous requests</div>
+        <div class="text-[11px] text-indigo-300 pt-1">Open User Portal →</div>
+      </button>
+      <button onclick="login('admin')" class="text-left p-5 rounded-2xl bg-[#0f131c] border border-[#1e2330] hover:border-indigo-500 transition space-y-2">
+        <div class="text-2xl">🛡️</div>
+        <div class="font-semibold text-white">Support team</div>
+        <div class="text-xs text-slate-400">See all tickets, criticality, similar past tickets &amp; outage groups</div>
+        <div class="text-[11px] text-indigo-300 pt-1">Open Admin Dashboard →</div>
+      </button>
+    </div>
+  </div>
+</section>
+
+<!-- ============ USER ============ -->
+<section id="v-user" class="hidden min-h-screen">
+  <header class="border-b border-[#1e2330] bg-[#0f131c]">
+    <div class="max-w-3xl mx-auto px-6 h-14 flex items-center justify-between">
+      <div class="flex items-center gap-2.5">
+        <div class="w-8 h-8 rounded-lg bg-[#181c24] border border-[#262c3a] flex items-center justify-center font-bold text-xs text-indigo-400">SD</div>
+        <div><div class="font-semibold text-white text-sm">SentinelDesk</div><div class="text-[10px] text-slate-400 -mt-0.5">CARE SUPPORT DESK</div></div>
+      </div>
+      <div class="flex items-center gap-3 text-xs">
+        <button onclick="login('admin')" class="px-2.5 py-1 rounded-lg bg-[#181c24] border border-[#2a3040] text-slate-300 hover:text-white">Switch to Admin</button>
+        <button onclick="show('login')" class="px-2.5 py-1 rounded-lg bg-[#181c24] border border-[#2a3040] text-slate-300 hover:text-white">Log out</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-3xl mx-auto px-6 py-8 space-y-8">
+    <div class="rounded-2xl bg-[#0f131c] border border-[#1e2330] p-5 space-y-4">
+      <div>
+        <h2 class="font-semibold text-white">Raise a ticket</h2>
+        <p class="text-xs text-slate-400">Write in English or German. Sent directly to <span class="font-mono">POST /triage</span>.</p>
+      </div>
+      <input id="u-subject" placeholder="Subject (optional)" class="w-full px-3.5 py-2.5 rounded-lg bg-[#141822] border border-[#232936] text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500" />
+      <textarea id="u-body" rows="3" placeholder="What's going wrong? e.g. VPN gateway refuses connections" class="w-full px-3.5 py-3 rounded-lg bg-[#141822] border border-[#232936] text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 resize-none"></textarea>
+      <div class="flex flex-wrap gap-2 items-center justify-between">
+        <div class="text-[11px] text-slate-500">Customer view hides internal AI confidence, rules, and masked text.</div>
+        <button id="u-submit" onclick="submitTicket()" class="px-5 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold">Submit ticket →</button>
+      </div>
+      <div id="u-toast" class="hidden text-xs px-3 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-300"></div>
+    </div>
+
+    <div class="space-y-3">
+      <div class="flex items-center justify-between">
+        <h2 class="text-lg font-bold text-white">My tickets</h2>
+        <div class="flex p-0.5 rounded-lg bg-[#141822] border border-[#232936] text-xs">
+          <button id="ut-ongoing" onclick="userTab='ongoing';renderUser()" class="px-3 py-1 rounded-md"></button>
+          <button id="ut-previous" onclick="userTab='previous';renderUser()" class="px-3 py-1 rounded-md"></button>
+        </div>
+      </div>
+      <div id="u-list" class="space-y-3"></div>
+    </div>
+  </main>
+</section>
+
+<!-- ============ ADMIN ============ -->
+<section id="v-admin" class="hidden min-h-screen flex flex-col">
+  <header class="h-14 px-6 border-b border-[#1e2330] bg-[#0f131c] flex items-center justify-between shrink-0">
+    <div class="flex items-center gap-2.5">
+      <div class="w-7 h-7 rounded-lg bg-indigo-600/20 border border-indigo-500/40 flex items-center justify-center font-bold text-xs text-indigo-400">SD</div>
+      <span class="font-semibold text-white">SentinelDesk</span><span class="text-xs text-indigo-400">Ops</span>
+    </div>
+    <div class="flex items-center gap-3 text-xs">
+      <button onclick="login('user')" class="px-2.5 py-1 rounded-lg bg-[#181c24] border border-[#2a3040] text-slate-300 hover:text-white">Switch to User</button>
+      <button onclick="refreshAdmin()" class="px-2.5 py-1 rounded-lg bg-[#181c24] border border-[#2a3040] text-slate-300 hover:text-white">Refresh</button>
+      <button onclick="show('login')" class="px-2.5 py-1 rounded-lg bg-[#181c24] border border-[#2a3040] text-slate-300 hover:text-white">Log out</button>
+    </div>
+  </header>
+
+  <div class="flex-1 p-5 space-y-4 bg-[#0a0e16] bg-[radial-gradient(#1e2330_1px,transparent_1px)] [background-size:16px_16px]">
+    <div id="a-banner"></div>
+    <div class="grid grid-cols-2 md:grid-cols-5 gap-3" id="a-stats"></div>
+    <div class="grid grid-cols-1 lg:grid-cols-[380px_1fr] gap-4">
+      <div class="rounded-2xl bg-[#0f131c] border border-[#1e2330] p-3 space-y-3 self-start">
+        <div class="flex items-center justify-between">
+          <span class="font-semibold text-white text-sm">All tickets</span>
+          <div class="flex p-0.5 rounded-lg bg-[#141822] border border-[#212736] text-[11px]" id="a-filters"></div>
+        </div>
+        <div id="a-list" class="space-y-1.5"></div>
+      </div>
+      <div id="a-detail" class="rounded-2xl bg-[#0f131c] border border-[#1e2330] p-5 space-y-4"></div>
+    </div>
+  </div>
+</section>
+
+<script>
+const TIER = {
+  PAGE_ONCALL:  { label:'Critical: engineer paged', short:'Critical', dot:'bg-rose-500',    text:'text-rose-400',    pill:'bg-rose-500/10 text-rose-300 border-rose-500/30',       btn:'bg-rose-600 hover:bg-rose-500',       rank:0 },
+  AGENT_REVIEW: { label:'Needs agent review',       short:'Review',   dot:'bg-amber-400',   text:'text-amber-400',   pill:'bg-amber-500/10 text-amber-300 border-amber-500/30',    btn:'bg-amber-600 hover:bg-amber-500',     rank:1 },
+  AUTO_DRAFT:   { label:'AI reply ready',           short:'AI ready', dot:'bg-emerald-400', text:'text-emerald-400', pill:'bg-emerald-500/10 text-emerald-300 border-emerald-500/30', btn:'bg-emerald-600 hover:bg-emerald-500', rank:2 },
+};
+
+let userTickets = [];
+let adminTickets = [];
+let outageAlert = { active: false };
+let selected = null;
+let filter = 'open';
+let userTab = 'ongoing';
+
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function fmtAgo(ts) {
+  const s = Math.max(0, Math.floor(Date.now()/1000 - ts));
+  if (s < 60) return s + 's ago';
+  if (s < 3600) return Math.floor(s/60) + 'm ago';
+  return Math.floor(s/3600) + 'h ago';
+}
+function show(v) {
+  ['login','user','admin'].forEach(k => document.getElementById('v-'+k).classList.toggle('hidden', k !== v));
+}
+async function login(role) {
+  show(role);
+  if (role === 'user') await refreshUser();
+  else await refreshAdmin();
+}
+
+// ---------- USER API ----------
+async function refreshUser() {
+  const res = await fetch('/tickets', { headers: { 'X-Role': 'customer' } });
+  userTickets = await res.json();
+  renderUser();
+}
+
+async function submitTicket() {
+  const subject = document.getElementById('u-subject').value.trim() || null;
+  const body = document.getElementById('u-body').value.trim();
+  if (!body) return;
+  const btn = document.getElementById('u-submit');
+  btn.disabled = true; btn.textContent = 'Submitting...';
+  try {
+    const res = await fetch('/triage', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Role': 'customer' },
+      body: JSON.stringify({ subject, body })
+    });
+    const data = await res.json();
+    document.getElementById('u-subject').value = '';
+    document.getElementById('u-body').value = '';
+    const toast = document.getElementById('u-toast');
+    toast.textContent = `Ticket ${data.ticket_id} submitted (${data.status}).`;
+    toast.classList.remove('hidden');
+    userTab = data.status === 'Replied' ? 'previous' : 'ongoing';
+    await refreshUser();
+  } finally {
+    btn.disabled = false; btn.textContent = 'Submit ticket →';
+  }
+}
+
+function renderUser() {
+  const ongoing = userTickets.filter(t => t.status !== 'Replied');
+  const previous = userTickets.filter(t => t.status === 'Replied');
+  const tab = (id, on, label) => {
+    const el = document.getElementById(id);
+    el.textContent = label;
+    el.className = 'px-3 py-1 rounded-md font-medium ' + (on ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white');
+  };
+  tab('ut-ongoing', userTab === 'ongoing', `Ongoing (${ongoing.length})`);
+  tab('ut-previous', userTab === 'previous', `Previous (${previous.length})`);
+  const list = userTab === 'ongoing' ? ongoing : previous;
+  if (!list.length) {
+    document.getElementById('u-list').innerHTML = `<div class="text-xs text-slate-500 p-4 rounded-xl border border-dashed border-[#232936]">No ${userTab} tickets yet. Raise one above!</div>`;
+    return;
+  }
+  document.getElementById('u-list').innerHTML = list.map(t => {
+    const title = esc(t.subject || t.body.slice(0, 60));
+    const head = `<div class="flex items-center justify-between gap-2"><div class="flex items-center gap-2 min-w-0"><span class="font-mono text-[11px] px-2 py-0.5 rounded bg-[#181c24] border border-[#232936] text-slate-300">${esc(t.ticket_id)}</span><span class="font-semibold text-white truncate">${title}</span></div><span class="text-[11px] text-slate-500 shrink-0">${fmtAgo(t.created_at)}</span></div>`;
+    if (t.status === 'Replied') {
+      return `<div class="rounded-xl bg-[#0f131c] border border-[#1e2330] p-4 space-y-3">${head}
+        <span class="inline-block text-[11px] px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-300">✓ Replied</span>
+        <div class="p-3 rounded-lg bg-[#141822] border border-[#232936] text-xs text-slate-300 leading-relaxed">${esc(t.reply || 'Resolved by our support team.')}</div></div>`;
+    }
+    const st = t.status === 'Received' ? 1 : 2;
+    const step = (n, label, sub) => {
+      const done = n < st, active = n === st;
+      return `<div class="flex flex-col items-center z-10"><div class="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold ${done?'bg-emerald-500 text-white':active?'bg-indigo-600 text-white ring-4 ring-indigo-500/20':'bg-[#181c24] border border-[#2e374a] text-slate-500'}">${done?'✓':active?'●':'·'}</div>
+        <span class="text-xs font-medium text-slate-300 mt-2">${label}</span><span class="text-[11px] mt-0.5 ${done?'text-emerald-400':active?'text-indigo-400':'text-slate-500'}">${sub}</span></div>`;
+    };
+    return `<div class="rounded-xl bg-[#0f131c] border border-[#1e2330] p-4 space-y-3">${head}
+      <div class="relative p-4 rounded-lg bg-[#0a0e16]/60 border border-[#181d28]">
+        <div class="absolute left-12 right-12 top-7 h-0.5 bg-[#1e2330]"><div class="h-full bg-emerald-400" style="width:${st===1?'15%':'55%'}"></div></div>
+        <div class="relative flex justify-between">${step(1,'Received','Logged')}${step(2,'In progress','With our team')}${step(3,'Replied','Waiting')}</div>
+      </div></div>`;
+  }).join('');
+}
+
+// ---------- ADMIN API ----------
+async function refreshAdmin() {
+  const [tRes, oRes] = await Promise.all([
+    fetch('/tickets', { headers: { 'X-Role': 'agent' } }),
+    fetch('/outage')
+  ]);
+  adminTickets = await tRes.json();
+  outageAlert = await oRes.json();
+  if (!selected && adminTickets.length) selected = adminTickets[0].ticket_id;
+  renderAdmin();
+}
+
+async function resolveTicket(id, targetStatus) {
+  await fetch(`/tickets/${encodeURIComponent(id)}/action`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status: targetStatus })
+  });
+  await refreshAdmin();
+}
+
+function isClosed(t) { return t.status === 'replied' || t.status === 'closed'; }
+function getTier(t) {
+  const tier = t.result && t.result.tier;
+  if (tier && TIER[tier]) return tier;
+  return (t.result && t.result.escalation === 'ESCALATE') ? 'PAGE_ONCALL' : 'AUTO_DRAFT';
+}
+
+function renderAdmin() {
+  const open = adminTickets.filter(t => !isClosed(t));
+  const closed = adminTickets.filter(isClosed);
+  const ai = adminTickets.filter(t => getTier(t) === 'AUTO_DRAFT').length;
+  const human = adminTickets.length - ai;
+  const aiPct = adminTickets.length ? Math.round(ai / adminTickets.length * 100) : 0;
+
+  document.getElementById('a-banner').innerHTML = outageAlert.active ? `
+    <div class="px-4 py-2.5 rounded-xl bg-rose-500/10 border border-rose-500/40 flex flex-wrap items-center justify-between gap-2 text-xs">
+      <span class="text-rose-200 font-semibold">🚨 ${esc(outageAlert.headline)}</span>
+    </div>` : '';
+
+  const stat = (label, val, sub, color) => `<div class="p-4 rounded-xl bg-[#0f131c] border border-[#1e2330]"><div class="text-[10px] font-mono uppercase tracking-wider text-slate-400">${label}</div><div class="text-2xl font-bold ${color} mt-1">${val}</div><div class="text-[11px] text-slate-500">${sub}</div></div>`;
+  document.getElementById('a-stats').innerHTML =
+    stat('All tickets', adminTickets.length, 'in ticket_store', 'text-white') +
+    stat('Open', open.length, 'need action', 'text-amber-300') +
+    stat('Closed', closed.length, 'resolved', 'text-emerald-300') +
+    stat('AI handled', ai, `${aiPct}% auto-draft ready`, 'text-indigo-300') +
+    stat('Human handled', human, `${100-aiPct}% escalated`, 'text-rose-300');
+
+  document.getElementById('a-filters').innerHTML = [['all','All'],['open','Open'],['closed','Closed']].map(([k,l]) =>
+    `<button onclick="filter='${k}';renderAdmin()" class="px-2.5 py-1 rounded-md font-medium ${filter===k?'bg-indigo-600 text-white':'text-slate-400 hover:text-white'}">${l}</button>`).join('');
+
+  const list = adminTickets
+    .filter(t => filter === 'all' || (filter === 'open' ? !isClosed(t) : isClosed(t)))
+    .sort((a,b) => (isClosed(a)===isClosed(b) ? 0 : isClosed(a)?1:-1) || TIER[getTier(a)].rank - TIER[getTier(b)].rank);
+
+  document.getElementById('a-list').innerHTML = list.map(t => {
+    const tr = TIER[getTier(t)], on = t.ticket_id === selected;
+    const title = esc(t.subject || t.body.slice(0, 48));
+    return `<div onclick="selected='${esc(t.ticket_id)}';renderAdmin()" class="p-2.5 rounded-lg border cursor-pointer ${on?'bg-[#181c24] border-indigo-500/70':'bg-[#121620] border-[#1e2330] hover:border-slate-700'}">
+      <div class="flex items-center justify-between gap-2">
+        <span class="flex items-center gap-2"><span class="w-2 h-2 rounded-full ${tr.dot}"></span><span class="font-mono text-[11px] ${on?'text-white':'text-slate-400'}">${esc(t.ticket_id)}</span></span>
+        <span class="text-[10px] ${isClosed(t)?'text-emerald-300':'text-amber-300'}">${esc(t.status)}</span>
+      </div>
+      <div class="text-xs truncate mt-1 ${on?'text-slate-100':'text-slate-300'}">${title}</div>
+      <div class="text-[10px] text-slate-500 mt-0.5">${esc(t.source)} · ${fmtAgo(t.created_at)}</div>
+    </div>`;
+  }).join('') || '<div class="text-xs text-slate-500 p-3">No tickets yet. Switch to User Portal to raise one!</div>';
+
+  const t = adminTickets.find(x => x.ticket_id === selected) || list[0];
+  if (!t) {
+    document.getElementById('a-detail').innerHTML = '<div class="text-xs text-slate-400">Select a ticket on the left or submit one from the User Portal.</div>';
+    return;
+  }
+  const r = t.result || {};
+  const tierKey = getTier(t);
+  const tr = TIER[tierKey];
+  const tri = r.triage || {};
+  const conf = Math.round((tri.triage_confidence || 0) * 100);
+  const reasons = r.escalation_reasons || [];
+  const precedents = r.precedents || [];
+  const piiText = r.pii_masked ? Object.entries(r.pii_found || {}).map(([k,v]) => `${k}×${v}`).join(', ') : 'none detected';
+  const box = (title, inner) => `<div class="space-y-2"><div class="text-[11px] font-mono uppercase tracking-wider text-slate-400">${title}</div>${inner}</div>`;
+  const targetStatus = tierKey === 'PAGE_ONCALL' ? 'closed' : 'replied';
+  const btnLabel = tierKey === 'AUTO_DRAFT' ? 'Approve & send AI reply' : tierKey === 'AGENT_REVIEW' ? 'Approve & mark replied' : 'Mark handled / close';
+
+  document.getElementById('a-detail').innerHTML = `
+    <div class="flex flex-wrap items-start justify-between gap-3 pb-3 border-b border-[#1e2330]">
+      <div class="space-y-1">
+        <div class="flex items-center gap-2"><span class="font-mono text-xs px-2 py-0.5 rounded bg-[#181c24] border border-[#232936] text-indigo-300">${esc(t.ticket_id)}</span>
+          <span class="text-[11px] px-2 py-0.5 rounded-full border ${isClosed(t)?'bg-emerald-500/10 border-emerald-500/30 text-emerald-300':'bg-amber-500/10 border-amber-500/30 text-amber-300'}">${esc(t.status)}</span></div>
+        <h2 class="text-lg font-bold text-white">${esc(t.subject || '(No subject)')}</h2>
+        <div class="text-xs text-slate-400">Source: ${esc(t.source)} · ${fmtAgo(t.created_at)} · Lang: ${esc(r.detected_language || 'en')}</div>
+      </div>
+      <span class="text-xs px-3 py-1.5 rounded-lg border font-semibold ${tr.pill}">${tr.label}</span>
+    </div>
+
+    <div class="grid md:grid-cols-2 gap-4">
+      ${box('Criticality & Safety Gate', `
+        <div class="p-3 rounded-xl bg-[#141822] border border-[#212736] space-y-2">
+          <div class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full ${tr.dot}"></span><span class="font-semibold ${tr.text}">${tr.short}</span><span class="text-xs text-slate-400">· priority ${esc(tri.priority || '—')}</span></div>
+          ${reasons.length ? reasons.map(x => `<div class="text-xs text-slate-300">• ${esc(x)}</div>`).join('') : '<div class="text-xs text-emerald-300">• All safety checks passed.</div>'}
+        </div>`)}
+      ${box('What the AI decided', `
+        <div class="p-3 rounded-xl bg-[#141822] border border-[#212736] space-y-1.5 text-xs">
+          <div class="flex justify-between"><span class="text-slate-400">Type</span><span class="text-white">${esc(tri.type || '—')}</span></div>
+          <div class="flex justify-between"><span class="text-slate-400">Team</span><span class="text-white">${esc(tri.queue || '—')}</span></div>
+          <div class="flex justify-between"><span class="text-slate-400">Priority</span><span class="text-white">${esc(tri.priority || '—')}</span></div>
+          <div class="pt-1"><div class="flex justify-between"><span class="text-slate-400">Confidence</span><span class="font-mono ${conf<55?'text-amber-300':'text-white'}">${conf}%</span></div>
+          <div class="h-1.5 mt-1 rounded bg-[#232936]"><div class="h-full rounded ${conf<55?'bg-amber-400':'bg-indigo-500'}" style="width:${conf}%"></div></div></div>
+        </div>`)}
+    </div>
+
+    ${box('Customer message', `<div class="p-3 rounded-xl bg-[#141822] border border-[#212736] text-xs text-slate-300 leading-relaxed">${esc(t.body)}</div>
+      <div class="text-[11px] text-slate-500">🔒 PII masked before LLM: ${esc(piiText)}</div>`)}
+
+    ${box(`Similar past tickets (${precedents.length})`, precedents.length ? precedents.map(s => `
+      <div class="p-3 rounded-xl bg-[#141822] border border-[#212736] space-y-1">
+        <div class="flex justify-between text-xs"><span class="font-mono text-cyan-300">${esc(s.ticket_id)}</span><span class="font-mono text-slate-400">${Math.round((s.similarity||0)*100)}% similar</span></div>
+        <div class="text-xs text-slate-300">${esc((s.answer || '').slice(0, 220))}</div>
+      </div>`).join('') : '<div class="p-3 rounded-xl bg-[#141822] border border-[#212736] text-xs text-slate-400">No historical precedents retrieved yet (index empty until make sentinel-index runs).</div>')}
+
+    ${box(isClosed(t) ? 'Final reply / status' : 'Suggested reply', `
+      <div class="p-3 rounded-xl bg-[#0a0e16] border border-[#1e2330] text-xs text-slate-300 leading-relaxed">${esc(r.draft_reply || r.refusal_reason || 'No draft reply generated.')}</div>
+      ${!isClosed(t) ? `<button onclick="resolveTicket('${esc(t.ticket_id)}','${targetStatus}')" class="px-4 py-2 rounded-lg text-white text-xs font-semibold ${tr.btn}">${btnLabel}</button>` : ''}`)}
+  `;
+}
+
+// Auto-route if opened at /user or /admin
+if (location.pathname === '/user') login('user');
+else if (location.pathname === '/admin') login('admin');
+</script>
+</body>
+</html>
