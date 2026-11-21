@@ -9,6 +9,7 @@ Backends:
     gemini  Google AI Studio via the google-genai SDK (pip install -e ".[gemini]")
 """
 
+import os
 import time
 from typing import TypeVar
 
@@ -143,7 +144,8 @@ class LLMRouter:
 
     def _gemini_once(self, system: str, user: str, schema: type[T]) -> T:
         s = self.settings
-        if not s.gemini_api_key:
+        use_vertex = os.environ.get("GOOGLE_GENAI_USE_VERTEXAI", "").strip().lower() == "true"
+        if not use_vertex and not s.gemini_api_key:
             raise LLMError("GEMINI_API_KEY is not set")
         try:
             from google import genai
@@ -152,10 +154,12 @@ class LLMRouter:
             raise LLMError('google-genai not installed: pip install -e ".[gemini]"') from e
 
         if self._gemini_client is None:
-            self._gemini_client = genai.Client(
-                api_key=s.gemini_api_key,
-                http_options=types.HttpOptions(timeout=int(s.gemini_timeout_s * 1000)),  # milliseconds
-            )
+            http_options = types.HttpOptions(timeout=int(s.gemini_timeout_s * 1000))  # milliseconds
+            if use_vertex:
+                # Vertex AI via ADC: passing api_key would force express mode and ignore the project.
+                self._gemini_client = genai.Client(http_options=http_options)
+            else:
+                self._gemini_client = genai.Client(api_key=s.gemini_api_key, http_options=http_options)
         thinking = None
         if s.gemini_thinking_level:
             try:

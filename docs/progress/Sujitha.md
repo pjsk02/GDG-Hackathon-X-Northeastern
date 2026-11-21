@@ -193,3 +193,19 @@ Key guarantees from `mask_spans(text)`:
 
 ### Open issues / notes for teammates
 - All 5 steps of Role D (`Sujitha-Branch`) are complete and ready for PR into `main` for Je to merge.
+
+## Cross-team request fulfilled: Vertex AI ADC in `agent/llm_router.py` (from `docs/requests/Je.md`)
+
+### What was built
+- Updated `LLMRouter._gemini_once` in `agent/llm_router.py` to support Vertex AI via `gcloud auth application-default login` (ADC):
+  - When `GOOGLE_GENAI_USE_VERTEXAI` is `"true"` (case-insensitive, stripped), skips the `if not s.gemini_api_key` check and constructs `genai.Client(http_options=...)` **without** `api_key=` so `google-genai` uses ADC with `GOOGLE_CLOUD_PROJECT` and `GOOGLE_CLOUD_LOCATION` instead of express mode.
+  - Preserves existing AI Studio `GEMINI_API_KEY` behavior when `GOOGLE_GENAI_USE_VERTEXAI` is unset or not `"true"`.
+  - No changes to frozen `shared/settings.py`.
+- Created `tests/test_llm_router.py` with **10 offline unit tests** (monkeypatched `genai.Client`) verifying ADC mode (`true`/`TRUE`/`True`/` true `, with or without `gemini_api_key`) and AI Studio mode (unset/`""`/`false`/`0`).
+
+### Verification
+- `.venv/bin/pytest -q tests/test_llm_router.py tests/test_gemini_config.py tests/test_team_contracts.py`: **26 passed, 0 failed**.
+- Re-ran Step 3's final check after merging Je's PR #2 (`eval/sentinel_eval.py`): `.venv/bin/python -m eval.sentinel_eval --sample 5 --compare extractive`:
+  - Loaded both `['cases_guardrails.jsonl', 'sentinel_cases.jsonl']` (26 cases total).
+  - **100.0% adversarial escalation rate (18/18)**, **6/6 injection cases caught**, **2/2 PII cases masked**, **0 misses on `cases_guardrails.jsonl`**.
+- Full test suite & ownership check verified before push.
