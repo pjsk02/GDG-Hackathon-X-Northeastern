@@ -95,13 +95,17 @@
     <div class="rounded-2xl bg-[#0f131c] border border-[#1e2330] p-5 space-y-4">
       <div>
         <h2 class="font-semibold text-white">Raise a ticket</h2>
-        <p class="text-xs text-slate-400">Write in English or German. Sent directly to <span class="font-mono">POST /triage</span>.</p>
+        <p class="text-xs text-slate-400">Write or record it in English or German. Sent directly to <span class="font-mono">POST /triage</span>.</p>
       </div>
       <input id="u-subject" placeholder="Subject (optional)" class="w-full px-3.5 py-2.5 rounded-lg bg-[#141822] border border-[#232936] text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500" />
       <textarea id="u-body" rows="3" placeholder="What's going wrong? e.g. VPN gateway refuses connections" class="w-full px-3.5 py-3 rounded-lg bg-[#141822] border border-[#232936] text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 resize-none"></textarea>
       <div class="flex flex-wrap gap-2 items-center justify-between">
         <div class="text-[11px] text-slate-500">Customer RBAC view hides internal AI confidence, rules, and masked text.</div>
-        <button id="u-submit" onclick="submitTicket()" class="px-5 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold">Submit ticket →</button>
+        <div class="flex gap-2 items-center">
+          <span id="u-voice-status" class="text-[11px] text-slate-400"></span>
+          <button id="u-voice" type="button" onclick="toggleVoice()" title="Record your ticket" class="px-4 py-2.5 rounded-lg bg-[#181c24] border border-[#2a3040] text-slate-200 hover:text-white text-xs font-semibold">🎙️ Record</button>
+          <button id="u-submit" onclick="submitTicket()" class="px-5 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold">Submit ticket →</button>
+        </div>
       </div>
       <div id="u-toast" class="hidden text-xs px-3 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-300"></div>
     </div>
@@ -297,6 +301,73 @@ async function refreshUser() {
   if (res.status === 401) { logout(); return; }
   userTickets = await res.json();
   renderUser();
+}
+
+// --- Voice ticket: record -> WAV in the browser -> POST /voice/transcribe -> fill the form ------------------
+let voiceRecorder = null, voiceChunks = [];
+
+function setVoiceUi(label, status, recording) {
+  const btn = document.getElementById('u-voice');
+  btn.textContent = label;
+  btn.classList.toggle('bg-rose-600', !!recording);
+  btn.classList.toggle('border-rose-500', !!recording);
+  document.getElementById('u-voice-status').textContent = status || '';
+}
+
+async function toggleVoice() {
+  if (voiceRecorder && voiceRecorder.state === 'recording') { voiceRecorder.stop(); return; }
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (e) {
+    setVoiceUi('🎙️ Record', 'Microphone blocked: allow it in the browser.');
+    return;
+  }
+  voiceChunks = [];
+  voiceRecorder = new MediaRecorder(stream);
+  voiceRecorder.ondataavailable = e => { if (e.data.size) voiceChunks.push(e.data); };
+  voiceRecorder.onstop = async () => {
+    stream.getTracks().forEach(t => t.stop());
+    setVoiceUi('🎙️ Record', 'Transcribing…');
+    document.getElementById('u-voice').disabled = true;
+    try {
+      const wav = await toWav(new Blob(voiceChunks, { type: voiceRecorder.mimeType }));
+      const res = await fetch('/voice/transcribe', {
+        method: 'POST', headers: authHeaders({ 'Content-Type': 'audio/wav' }), body: wav
+      });
+      const data = await res.json();
+      if (!res.ok) { setVoiceUi('🎙️ Record', data.detail || 'Could not transcribe.'); return; }
+      document.getElementById('u-subject').value = data.subject || '';
+      document.getElementById('u-body').value = data.body || '';
+      setVoiceUi('🎙️ Record', `Transcribed (${(data.language || 'en').toUpperCase()}). Review, then submit.`);
+    } catch (e) {
+      setVoiceUi('🎙️ Record', 'Could not transcribe the recording.');
+    } finally {
+      document.getElementById('u-voice').disabled = false;
+    }
+  };
+  voiceRecorder.start();
+  setVoiceUi('⏹ Stop', 'Recording… click Stop when done.', true);
+}
+
+// Browsers record WebM/MP4; Gemini takes WAV. Decode, mix to mono, write 16-bit PCM WAV.
+async function toWav(blob) {
+  const ctx = new (window.AudioContext || window.webkitAudioContext)();
+  const audio = await ctx.decodeAudioData(await blob.arrayBuffer());
+  ctx.close();
+  const n = audio.length, rate = audio.sampleRate, mono = new Float32Array(n);
+  for (let c = 0; c < audio.numberOfChannels; c++) {
+    const data = audio.getChannelData(c);
+    for (let i = 0; i < n; i++) mono[i] += data[i] / audio.numberOfChannels;
+  }
+  const buf = new ArrayBuffer(44 + n * 2), v = new DataView(buf);
+  const str = (o, t) => { for (let i = 0; i < t.length; i++) v.setUint8(o + i, t.charCodeAt(i)); };
+  str(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); str(8, 'WAVE'); str(12, 'fmt ');
+  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+  str(36, 'data'); v.setUint32(40, n * 2, true);
+  for (let i = 0; i < n; i++) v.setInt16(44 + i * 2, Math.max(-1, Math.min(1, mono[i])) * 0x7fff, true);
+  return new Blob([buf], { type: 'audio/wav' });
 }
 
 async function submitTicket() {
