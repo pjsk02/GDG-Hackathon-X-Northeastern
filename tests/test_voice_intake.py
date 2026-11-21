@@ -27,7 +27,7 @@ def test_transcribes_into_subject_and_body():
     client, seen = _client('{"subject": " VPN down ", "body": " Our VPN is down since 9. ", "language": "en"}')
     vt = transcribe_ticket(b"RIFF....", "audio/wav", settings=S, client=client)
     assert (vt.subject, vt.body, vt.language) == ("VPN down", "Our VPN is down since 9.", "en")
-    assert seen["model"] == "gemini-test"
+    assert seen["model"] == "gemini-3.5-flash-lite"
     assert seen["contents"][0].inline_data.mime_type == "audio/wav"
     assert seen["config"].response_mime_type == "application/json"
 

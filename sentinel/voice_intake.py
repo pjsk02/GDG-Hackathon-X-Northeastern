@@ -4,7 +4,7 @@
     vt = transcribe_ticket(audio_bytes, mime_type="audio/wav")    # -> VoiceTicket(subject, body, language)
 
 Gemini listens to the audio and returns a verbatim transcript in the speaker's language (English or German) plus a
-short subject line. Uses GEMINI_API_KEY, or Vertex AI with GOOGLE_GENAI_USE_VERTEXAI=true (same switch as
+short subject line, with GEMINI_VOICE_MODEL (default gemini-3.5-flash-lite). Uses GEMINI_API_KEY, or Vertex AI with GOOGLE_GENAI_USE_VERTEXAI=true (same switch as
 agent/llm_router.py). Raises VoiceIntakeError with a readable message on any failure.
 """
 
@@ -16,6 +16,9 @@ import os
 from pydantic import BaseModel, Field
 
 from shared.settings import Settings, get_settings
+
+# Transcription needs a fast audio model, not the drafting model (gemini-4-hydrogen timed out on a 7 s clip).
+VOICE_MODEL = os.environ.get("GEMINI_VOICE_MODEL", "gemini-3.5-flash-lite")
 
 PROMPT = (
     "This is a voice message from a customer to an IT support desk. Transcribe it word for word in the language it "
@@ -65,7 +68,7 @@ def transcribe_ticket(
 
         client = client or _get_client(settings)
         resp = client.models.generate_content(
-            model=settings.gemini_model,
+            model=VOICE_MODEL,
             contents=[types.Part.from_bytes(data=audio, mime_type=mime_type), PROMPT],
             config=types.GenerateContentConfig(response_mime_type="application/json", response_schema=VoiceTicket),
         )
