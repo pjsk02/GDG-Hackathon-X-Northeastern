@@ -19,7 +19,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from shared.contracts import EscalationDecision
+from shared.contracts import EscalationDecision, Tier
 
 # --- thresholds (overridable via Settings, and live in the console sidebar) ------
 # Tuned on 1,200 holdout tickets. At these values the gate escalates ~61% of tickets and catches
@@ -115,11 +115,30 @@ def post_draft_gate(outcome: GateOutcome, grounded: bool, refused: bool, refusal
     return GateOutcome("ESCALATE" if reasons else "AUTO_DRAFT", reasons)
 
 
-def decide_tier(decision: EscalationDecision, reasons: list[str]) -> str:
+_PAGE_ONCALL_RULES = frozenset({"R1", "R2", "R5", "R7"})
+_AGENT_REVIEW_RULES = frozenset({"R3", "R4", "R6"})
+_RULE_CODE_RE = re.compile(r"^(R\d+)\b", re.IGNORECASE)
+
+
+def _parse_rule_code(reason: str) -> str | None:
+    """Extract the leading rule code (e.g. 'R1') from an escalation reason string."""
+    match = _RULE_CODE_RE.match((reason or "").strip())
+    return match.group(1).upper() if match else None
+
+
+def decide_tier(decision: EscalationDecision, reasons: list[str]) -> Tier:
     """Three-tier gate (N1). Owner: E (Kaushik).
 
-    PLACEHOLDER: maps the old two-way decision straight across. E replaces it with the PRD mapping:
-    R1, R2, R5, R7 -> "PAGE_ONCALL"; only R3, R4, R6 -> "AGENT_REVIEW"; no reasons -> "AUTO_DRAFT".
-    Keep the signature: sentinel/pipeline.py calls decide_tier(result.escalation, result.escalation_reasons).
+    Maps escalation reasons to a handling tier:
+    - no reasons -> "AUTO_DRAFT"
+    - any of R1, R2, R5, R7 -> "PAGE_ONCALL"
+    - only R3, R4, R6 -> "AGENT_REVIEW"
     """
-    return "PAGE_ONCALL" if decision == "ESCALATE" else "AUTO_DRAFT"
+    if not reasons:
+        return "AUTO_DRAFT"
+    codes = {_parse_rule_code(reason) for reason in reasons}
+    if codes & _PAGE_ONCALL_RULES:
+        return "PAGE_ONCALL"
+    if codes <= _AGENT_REVIEW_RULES:
+        return "AGENT_REVIEW"
+    return "PAGE_ONCALL"
