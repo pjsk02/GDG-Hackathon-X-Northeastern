@@ -138,3 +138,58 @@ Measured on 20 tickets from the validation slice (`sentinel.dataset.load_train_v
 
 ### Open issues / notes for teammates
 - Even with `fallback=False`, Gemini returned 0 rejected citations (32/32 verified verbatim) and 0 `check_claims` violations across 19/19 successful calls, with 100% `briefing` compliance (12–22 words, including on the refused ticket). In production (`fallback=True`), the single transient 503 spike automatically falls back to `extractive` cleanly.
+
+## Step 5: PII and "What the AI saw" (B3)
+
+### What was built
+- Upgraded `sentinel/pii.py` while keeping `mask_pii(text)` and `has_pii(text)` signatures unchanged:
+  - Added `mask_spans(text: str) -> list[tuple[int, int, str]]`, returning sorted, non-overlapping `(start, end, label)` character offsets in the original text with deterministic overlap resolution (`EMAIL`, `URL`, `IBAN`, `IPV4`, `CARD`, `PHONE`, `ACCOUNT`, `ADDRESS`; longer span wins on tie).
+  - Rebuilt `mask_pii(text)` directly on top of `mask_spans(text)` so every `(start, end, label)` span corresponds 1-to-1 with each `<LABEL>` replacement and badge count in `result.pii_found`.
+  - Eliminated false positives on dates (`2026-11-21`, `21.11.2026`, `11/21/2026`, `2026-03-15 14:30`), version/build numbers (`v1.2.3.4`, `version 10.2.3.1`, `Build 10.0.19045.4170`, `Python 3.12.15`), out-of-range IPv4 (`999.888.777.666`), standalone ticket IDs (`TKT-01234`, `SD-1042`, `INC-20260315`), numeric ranges/prices (`2025-2026`, `5000 EUR`), and non-digit prose (`account settings`, `customer service`).
+  - Added/improved EN & DE coverage: German phone formats (`+49 (0) 30 ...`, `0049 ...`, `030 / ...`, `(089) ...`, `0171-...`), German & SEPA IBANs (compact, space- and hyphen-grouped with country length/structure checks), EN & DE street addresses (`Hauptstraße 42`, `Berliner Str. 12a, 10115 Berlin`, `360 Huntington Ave`, `123 Main Street, Apt 4B` without swallowing sentence-ending periods), URLs with trailing punctuation preserved, and digit-validated account IDs (`account KUNDE-884213`, `ACCT-774920`, `Kundennummer: 123456`).
+- Created `tests/test_pii.py` with **56 offline test cases** covering false-positive controls, German/US phone numbers, German/EU IBANs, EN/DE street addresses, emails/IPv4/cards/accounts/URLs, `mask_spans` structural & reconstruction invariants, and mixed real-world tickets (`pii-contact`, `guard-pii-masking-en`).
+
+### How Kaushik (Role E) should highlight "What the AI saw" in Streamlit
+`result.pii_masked_body` already holds the masked text sent to the LLM (`ticket_text({"subject": masked_subject, "body": masked_body})`), and `result.pii_found` holds `{label: count}` for summary badges.
+
+To highlight exact masked spans in the **original** ticket side-by-side with `result.pii_masked_body` (or inside an expandable `"What the AI saw"` panel):
+
+```python
+import html
+from sentinel.pii import mask_spans
+
+def render_highlighted_pii(raw_text: str) -> str:
+    """Render raw_text with redaction spans highlighted and labeled."""
+    spans = mask_spans(raw_text)
+    if not spans:
+        return html.escape(raw_text)
+    parts: list[str] = []
+    cursor = 0
+    for start, end, label in spans:
+        parts.append(html.escape(raw_text[cursor:start]))
+        snippet = html.escape(raw_text[start:end])
+        parts.append(
+            f'<mark style="background:#ffe4b5;padding:0 3px;border-radius:3px;">'
+            f'{snippet} <sup style="font-weight:600;">&lt;{html.escape(label)}&gt;</sup></mark>'
+        )
+        cursor = end
+    parts.append(html.escape(raw_text[cursor:]))
+    return "".join(parts)
+```
+
+Key guarantees from `mask_spans(text)`:
+- Spans are **sorted** by `start` and **strictly non-overlapping** (`prev_end <= next_start`), so a single forward pass over `raw_text` is always safe.
+- Always HTML-escape the text outside and inside each span (`html.escape`) before passing `unsafe_allow_html=True` to `st.markdown(...)`.
+- Because `mask_pii(raw_text)` splices the exact same `mask_spans(raw_text)` list, the highlighted spans on the left (`raw_text`) match every `<LABEL>` placeholder on the right (`result.pii_masked_body`) 1-to-1.
+
+### Files changed
+- `sentinel/pii.py`
+- `tests/test_pii.py`
+- `docs/progress/Sujitha.md`
+
+### Verification
+- `.venv/bin/pytest -q tests/test_pii.py`: **56 passed, 0 failed**.
+- Full test suite & ownership check verified via `test-runner` and `ownership-reviewer`.
+
+### Open issues / notes for teammates
+- All 5 steps of Role D (`Sujitha-Branch`) are complete and ready for PR into `main` for Je to merge.
