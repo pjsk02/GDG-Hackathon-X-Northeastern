@@ -1,130 +1,172 @@
-# Grounded Agent scaffold
+# SentinelDesk
 
-Ask questions over code, documents and media; get back only claims that are **verified against a verbatim quote** in the indexed source, with file + line or timestamp. Anything the model can't back up is rejected and shown as "caught".
+**Support-ticket triage that knows when not to answer.** A ticket comes in (English or German). SentinelDesk
+predicts its **type, team and priority** with a confidence score, runs a **safety gate** that decides whether the
+ticket can get an AI draft, needs an agent's review, or must page the on-call engineer, retrieves **past resolved
+tickets**, and drafts a reply that **cites them verbatim**. Any claim, number or promise that no cited ticket backs
+is caught before a human ever sees it as "ready to send".
 
-Everything runs offline by default (hash embeddings + an extractive no-LLM baseline), so the pipeline works before any model or key is set up. Switch to real models in `.env`.
+Built in 6 hours for the GDG Hackathon x Northeastern on the
+[multilingual customer-support tickets dataset](https://huggingface.co/datasets/Tobi-Bueck/customer-support-tickets)
+(28,587 tickets, EN + DE).
 
+## What it does
+
+| Step | What happens | Where |
+|---|---|---|
+| 1. Mask | Emails, phones, account ids and IPs are masked before any text reaches an LLM ("What the AI saw") | `sentinel/pii.py` |
+| 2. Classify | TF-IDF + logistic regression, one head each for type, queue and priority, plus language; calibrated on the validation slice | `sentinel/triage.py`, `sentinel/calibration.py` |
+| 3. Explain | The words that pushed each label ("why this label") | `sentinel/explain.py` |
+| 4. Retrieve | Nearest past resolved tickets from the knowledge base (Gemini embeddings; works across EN/DE) | `memory/`, `sentinel/ingest_tickets.py` |
+| 5. Gate | Seven deterministic rules (R1-R7), each with a reason an operator can read, map to three tiers | `sentinel/escalation.py` |
+| 6. Draft | Gemini writes a reply in the customer's language citing past tickets; fallback local Gemma, then a no-AI quote | `sentinel/writer.py`, `agent/llm_router.py` |
+| 7. Verify | Every citation must appear verbatim in a retrieved resolution; every number, price, date or promise must appear in a cited quote | `sentinel/writer.py`, `sentinel/claims.py` |
+
+### The three-tier gate
+
+| Tier | When | Rules |
+|---|---|---|
+| **Auto-draft** | Every rule passes | none |
+| **Agent review** | The model is unsure or ungrounded | R3 low triage confidence · R4 no historical precedent · R6 ungrounded draft or unbacked number/promise |
+| **Page on-call** | Outages, commitments and attacks | R1 high-priority incident · R2 likely high priority (recall safety net) · R5 refund / SLA / legal / cancellation / credential demand · R7 prompt injection |
+
+The thresholds behind R2-R4 are **tuned on a validation slice, never on the holdout** (see [Evaluation and leakage](#evaluation-and-leakage)),
+and the **safety dial** shows managers what each setting costs in on-call pages and buys in recall.
+
+## Architecture
+
+```mermaid
+flowchart LR
+  subgraph In[Ticket in]
+    C[Customer page / API] --> Q[Smart queue<br/>urgent first, max N LLM calls]
+  end
+  Q --> P[PII mask]
+  P --> T[Triage model<br/>type · queue · priority<br/>+ confidence + why]
+  P --> R[Retrieve past tickets<br/>Gemini embeddings, SQLite]
+  T --> G{Safety gate<br/>R1-R5, R7}
+  R --> G
+  G -->|R1 R2 R5 R7| O[Page on-call]
+  G -->|R3 R4| A[Agent review]
+  G -->|pass| W[Gemini writer<br/>cites past tickets]
+  W --> V{Verify<br/>verbatim quotes<br/>numbers and promises}
+  V -->|R6 fails| A
+  V -->|ok| D[Auto-draft ready]
+  O & A & D --> S[(Ticket store)]
+  S --> UI[Agent board · Manager page · Queue page]
+  K[(kb_train: 22,869 resolved tickets)] -.indexed.-> R
+  K -.trained on.-> T
 ```
-ingest_*  ->  Chunk  ->  VectorStore (SQLite)  ->  retrieve  ->  LLM (DraftAnswer)  ->  grounding  ->  AgentAnswer
-                                                                                         |
-                                                                       api/  ui/  eval/ all consume this
-```
 
-## Layout
-
-| Path | What it is |
+| Layer | Tech |
 |---|---|
-| `shared/contracts.py` | **The JSON contract.** Every module imports from here. `make schema` writes JSON Schema to `shared/schema/` for non-Python clients. |
-| `shared/settings.py` | All config, read from `.env`. |
-| `agent/llm_router.py` | One `complete(system, user, Schema)` call for Ollama (local) and Gemini (AI Studio), always returning a validated Pydantic object. |
-| `agent/grounding.py` | Rejects findings whose quote isn't in the cited chunk, that cite unknown chunks, or that fall below `MIN_CONFIDENCE`. Source and line come from the store, never the model. |
-| `agent/pipeline.py` | `Agent().ask(question)`. Put kickoff domain logic in `DOMAIN_INSTRUCTIONS`. |
-| `memory/` | Embedder (hash / Ollama EmbeddingGemma 2), SQLite vector store, and `ingest_code.py`, `ingest_docs.py`, `ingest_media.py`. |
-| `eval/run.py`, `eval/cases.jsonl` | Benchmark: pass rate, abstain accuracy, source precision, hallucination rate, latency, plus `chart.png` and `results.csv`. |
-| `api/main.py` | FastAPI: `/ask`, `/search`, `/sources`, `/health`, plus `/a2ui` (page) and `/a2ui/agent` (A2UI messages). |
-| `api/a2ui.py`, `api/static/a2ui.html` | A2UI v1.0: turns a grounded `AgentAnswer` into A2UI surfaces; the page renders them with Google's official Lit renderer. |
-| `ui/app.py` | Streamlit demo: raw input, cited finding and confidence side by side. |
-| `samples/` | Tiny synthetic corpus so everything runs end to end. Replace at kickoff. |
-| `eval/cases_repo.jsonl` | 28-case stand-in benchmark over this repo's own code (`make index-bench`, `make eval-bench`), so retrieval is actually tested (~100 chunks, `TOP_K=5`). |
-| `tools/vendor_a2ui.py` | Mirrors the A2UI renderer into `api/static/vendor/` so the A2UI page works offline. |
-| `docker-compose.yml` | Optional Ollama container (`make ollama-up`), for machines without native Ollama. |
+| Classifier | scikit-learn TF-IDF (word + char n-grams) + logistic regression, calibrated |
+| Retrieval | Gemini embeddings (`EMBED_PROVIDER=gemini`), brute-force cosine in SQLite; hash embeddings for offline dev |
+| Drafting | Gemini with a JSON schema; fallback chain Gemini -> local Gemma (Ollama) -> extractive quote |
+| App | Streamlit (agent board, customer, manager and queue pages), FastAPI (`POST /triage` with role-based views) |
+| Contracts | Pydantic models in `shared/contracts.py`, frozen and checked by `tests/test_team_contracts.py` |
 
-The Boston open data pipeline (CKAN -> PostGIS) that used to share this folder now lives in its own project, `D:\Projects\New folder`.
+## How to run
 
-## Setup
+Requires Python 3.12 and [uv](https://docs.astral.sh/uv/getting-started/installation/).
 
 ```bash
-uv venv --python 3.12
+uv venv --python 3.12 && uv pip install -e ".[all]"
 ```
 
 ```bash
-uv pip install -e ".[all]"
-```
-
-(`[all]` = Gemini, Streamlit UI, plots, PDF support and the test tools. Audio transcription is separate: `.[media]`.)
-
-```bash
-cp .env.example .env
-```
-
-Then smoke test:
-
-```bash
-make index-samples
+cp .env.example .env    # add GEMINI_API_KEY for Gemini drafting and embeddings; everything else runs offline
 ```
 
 ```bash
-make ask Q="How quickly are reported potholes repaired?"
+mkdir -p data/raw && curl -L -o data/raw/aa_dataset-tickets-multi-lang-5-2-50-version.csv \
+  https://huggingface.co/datasets/Tobi-Bueck/customer-support-tickets/resolve/main/aa_dataset-tickets-multi-lang-5-2-50-version.csv
 ```
 
-```bash
-make eval
-```
+Then, with the venv active (`source .venv/bin/activate`, or `.venv\Scripts\activate` on Windows):
 
-```bash
-make ui
-```
+| Command | What it does |
+|---|---|
+| `make sentinel-split` | 80/20 split (seed 42) + leakage report -> `data/sentinel/{kb_train,holdout_test}.csv` |
+| `make sentinel-train` | Train the triage model -> `data/sentinel/triage_model.joblib` |
+| `make sentinel-index` | Index kb_train for retrieval (`EMBED_PROVIDER=gemini` for the demo, `hash` for fast offline dev) |
+| `make tune` | Tune gate thresholds on the validation slice -> `data/sentinel/thresholds.json` |
+| `make dial` | Safety dial sweep -> `data/eval/safety_dial.json` + `.png` |
+| `make sentinel-eval` | Full evaluation -> `data/eval/latest/report.json` (`python -m eval.sentinel_eval --sample 120 --compare gemini extractive`) |
+| `make console` | Streamlit app |
+| `pytest -q` | All tests, offline, a few seconds |
 
-## A2UI UI
+No API key? `LLM_PROVIDER=extractive` and `EMBED_PROVIDER=hash` (the defaults) run the whole pipeline offline.
 
-`make api`, then open http://127.0.0.1:8000/a2ui (or `/`, which redirects there).
+## Evaluation and leakage
 
-The agent answers in [A2UI v1.0](https://a2ui.org/specification/v1.0-a2ui/), Google's open agent-to-UI protocol: a
-list of `createSurface` + `updateComponents` messages using the Basic Catalog. Any A2UI renderer (web, Flutter,
-Android, iOS) can draw the same response.
+**Split recipe.** Exactly the brief's: shuffle with `random_state=42`, assign `TKT-xxxxx` ids, cut at 80%.
+`kb_train` (22,869) is the knowledge base: the model trains on it and the index holds it, answers included. The
+**holdout** (5,718) is only ever used for inputs at inference and for final scoring.
 
-- **Built in code, not by the model.** `api/a2ui.py` builds the surface from the answer *after* grounding, so only
-  verified text reaches the screen. Body text is Markdown-escaped and source chunks are fenced.
-- **One surface per answer.** Each verified finding is a card (claim, quote, source and line, confidence).
-  Abstentions, rejections and fallbacks are shown too.
-- **Actions:** `show_source {chunk_id}` opens the cited chunk; `reask {question, provider}` asks again with
-  Gemma 4 or Gemini and stacks the result for side-by-side comparison.
-- **Renderer:** `@a2ui/lit` + `@a2ui/web_core` 0.15.0 and `@a2ui/markdown-it` 0.2.2, mirrored from esm.sh into
-  `api/static/vendor/` (no Node build) and served locally, so the page works with no internet.
-  Re-mirror after bumping a version: `make vendor`.
-- **Tests:** `tests/test_a2ui.py` validates every message against the official schemas in `tests/a2ui_v1_0/`.
+**Validation-only tuning.** The last 10% of kb_train (2,287 tickets) is the validation slice. Gate thresholds and
+calibration are fitted there with a triage model trained on the other 90%, and a validation ticket's own entry is
+removed from its retrieval results. No number in this README was tuned on the holdout.
 
-## Switching to real models
+**The index holds kb only.** Every evaluation run checks that the index contains no ticket outside kb_train and no
+holdout id, and stops if it does.
 
-Local (offline), with native Ollama (or `make ollama-up` and prefix with `docker compose exec ollama`):
+| Leakage check | Result |
+|---|---|
+| Holdout ticket ids in kb / in the index | 0 / 0 |
+| Index entries outside kb_train | 0 |
+| Identical bodies across the split | 1: the placeholder body "Assistance needed" under two different subjects |
 
-```bash
-ollama pull gemma4:e4b
-```
+### Metrics
 
-```bash
-ollama pull embeddinggemma-2:570m
-```
+Holdout triage is scored on all 5,718 holdout tickets; end-to-end numbers on a 120-ticket holdout sample. Numbers are
+filled from `data/eval/latest/report.json` only.
 
-Then in `.env`: `LLM_PROVIDER=ollama`, `EMBED_PROVIDER=ollama`. **Re-index after changing the embedder** (vectors are tagged per embedder and won't mix).
+| Metric | Value |
+|---|---|
+| Type Macro-F1 | _TBD (final run)_ |
+| Queue Macro-F1 | _TBD_ |
+| Priority Macro-F1 | _TBD_ |
+| High-priority-incident recall (via the gate) | _TBD_ |
+| Calibration error (ECE, before -> after) | _TBD_ |
+| Groundedness (drafts with a verified citation) | _TBD_ |
+| Citation rejection rate | _TBD_ |
+| Tier rates: auto-draft / agent review / on-call | _TBD_ |
+| Behaviour cases passed (adversarial + routine) | _TBD_ |
+| Latency p50 / p95 | _TBD_ |
 
-Models are loaded at startup (`WARM_UP=true`) and kept for `OLLAMA_KEEP_ALIVE` (30m). On demo day set `OLLAMA_KEEP_ALIVE=-1m` so they never unload.
+## Bonus features
 
-Gemini: set `GEMINI_API_KEY` (default model `gemini-4-hydrogen`; `gemini-3.5-flash-lite` is the cheaper free-tier option), then `LLM_PROVIDER=gemini`, or pick per request (`provider` field on `/ask`, the UI dropdown, or `--provider`).
+- **Safety dial:** high-priority-incident recall against on-call workload across threshold settings (validation slice), on the manager page.
+- **Number-and-promise guard:** a "48 hours", "20% off" or "full refund" the cited tickets do not contain sends the draft to review.
+- **Why this label:** the words that pushed each prediction.
+- **Cross-lingual matching:** a German ticket finds the English fix (Gemini embeddings).
+- **Smart priority queue:** urgent tickets jump the line with a cap on concurrent LLM calls; live view and a ticket simulator.
+- **Outage burst detection:** a burst of similar tickets raises a banner and groups into one incident.
+- **Learning loop:** agents correct labels; a challenger model is promoted only if validation holds.
+- **Role views:** customers see status and the approved reply only, never confidence, precedents or reasons.
+- **PII masking and prompt-injection detection** before anything reaches the LLM.
 
-### Fallback chain
+## Repository map
 
-If the chosen provider errors, times out, is rate-limited or returns invalid JSON, the agent tries the next one in `LLM_FALLBACK` (default `ollama,extractive`). With `LLM_PROVIDER=gemini` that gives **gemini -> local Gemma -> extractive**, so a Wi-Fi drop mid-demo still produces a cited answer. A failed provider is skipped for `LLM_COOLDOWN_S` (60 s) so later requests don't each wait out the timeout. `GEMINI_TIMEOUT_S` (30 s) caps a hung cloud call.
+| Path | Owner | What |
+|---|---|---|
+| `sentinel/pipeline.py` | Kaushik | `SentinelAgent.triage(subject, body) -> SentinelResult`, orchestrates everything |
+| `sentinel/triage.py`, `explain.py`, `feedback.py`, `calibration.py` | Shishir | classifier, explanations, learning loop, calibration |
+| `memory/`, `sentinel/ingest_tickets.py`, `ticket_store.py`, `smart_queue.py`, `outage.py` | Rithwik | retrieval, ticket store, queue, incidents |
+| `sentinel/writer.py`, `claims.py`, `injection.py`, `pii.py`, `agent/llm_router.py` | Sujitha | prompt, guards, Gemini |
+| `sentinel/escalation.py`, `ui/`, `api/` | Kaushik | gate and tiers, Streamlit pages, FastAPI |
+| `sentinel/dataset.py`, `thresholds.py`, `eval/` | Je | split, validation slice, thresholds, safety dial, metrics |
+| `docs/demo/` | Je | demo tickets and the 5-minute script |
 
-A valid answer that abstains, or whose claims all fail grounding, does **not** trigger fallback.
+Product spec: [docs/PRD.md](docs/PRD.md) · team plan: [docs/team/README.md](docs/team/README.md) · the scaffold this
+grew from: [docs/scaffold.md](docs/scaffold.md).
 
-Every `AgentAnswer` records `provider` (who actually answered), `fell_back`, and `attempts` (each step with its error and latency). The UI shows "answered by X instead" when it happens, and `/health` lists providers that are cooling down. The UI checkbox, `"fallback": false` on `/ask`, and `eval.run` (off unless `--fallback`) let you pin one provider.
+## Team
 
-Compare providers for the pitch:
-
-```bash
-python -m eval.run --compare extractive ollama gemini
-```
-
-## At kickoff
-
-1. Drop the dataset somewhere and index it: `make index-docs DIR=...` / `index-code` / `index-media`.
-2. Write the domain prompt into `DOMAIN_INSTRUCTIONS` in `agent/pipeline.py`.
-3. Replace `eval/cases.jsonl` with 20-30 domain questions, including a few that should abstain.
-4. If the JSON contract must change, change `shared/contracts.py` only, then `make schema`.
-
-## Tests
-
-```bash
-make test
-```
+| Name | Role |
+|---|---|
+| Je | Data, evaluation, thresholds, safety dial, README, demo; integration lead |
+| Shishir | Triage model: calibration, explanations, learning loop |
+| Rithwik | Retrieval and Gemini embeddings, ticket store, smart queue, incidents |
+| Sujitha | Gemini writer and guardrails (citations, number-and-promise guard, injection, PII) |
+| Kaushik | Three-tier gate, Streamlit pages, API, pipeline wiring |
