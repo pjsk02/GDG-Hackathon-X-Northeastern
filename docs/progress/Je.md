@@ -221,3 +221,31 @@ Two misses, both expected with today's stubs, not code bugs:
   `pipeline.<provider>` (tier rates, groundedness, latency), `pipeline.<provider>.behaviour`, `calibration`.
 - Shishir: `report(model, df) -> dict` in `sentinel/calibration.py` is picked up automatically.
 - Sujitha: `eval/cases_guardrails.jsonl` is picked up automatically; the optional `expect_*` fields above work there too.
+
+## Step 5 - README and cleanup (F6) (2026-11-21)
+
+**Built:**
+- `README.md` rewritten for judges: what SentinelDesk does (7-step table), the three-tier gate, a mermaid
+  architecture diagram, how to run (setup, data download, `make` targets), the leakage statement (split recipe,
+  validation-only tuning, the index holds kb only, leakage check table), a metrics table with `_TBD_` placeholders
+  (filled in Step 6 from `data/eval/latest/report.json` only), bonus features, a repository map with owners, and the team.
+- Old scaffold README moved to `docs/scaffold.md` (`git mv`, history kept) with an "archived" note.
+- `AUDIT.md` deleted (it audited the earlier boilerplate project; nothing in it applies to SentinelDesk).
+- `samples/` **kept**: `tests/test_pipeline.py`, `tests/test_fallback.py` and `make index-samples`/`index-bench`
+  load files from it, so `pytest -q` would fail without it.
+- `docs/demo/demo_tickets.md`: 10 demo tickets (DE outage with PII, EN outage, refund trap, EN and DE injection,
+  empty-subject outage, number trap, DE cross-lingual printer, password reset, DE invoice), each with what it shows,
+  the expected tier and rule, and what to look for.
+- `docs/demo/script.md`: the PRD's 5-minute script with timings, a pre-stage checklist, a "what if it breaks" table
+  and likely judge questions.
+
+### Verified
+
+- `pytest -q`: 79 passed; ownership OK.
+- README rendering checked on GitHub after the push (see report).
+
+### Notes
+
+- Team: the demo needs Kaushik's pages (board, customer, queue, manager), Rithwik's Gemini index and simulator, and
+  Sujitha's guard and injection detector. The "Expected tier" column uses the PRD three-tier mapping.
+- Step 6: replace every `_TBD_` in the README metrics table with values from `data/eval/latest/report.json`.
