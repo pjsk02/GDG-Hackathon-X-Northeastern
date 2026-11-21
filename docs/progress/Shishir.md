@@ -193,3 +193,96 @@ serve rows from before the refit. `fit()` now clears it, and a test checks this.
   each phrase is a real substring of the text, apart from rare lowercase unigram fallbacks.
 - **Step 4 (feedback):** after promotion, set `triage._CACHED = None`. The explain cache follows the new heads
   by itself.
+
+## Step 4 - Learning loop (N8) (2026-11-21)
+
+**Built:** `retrain_challenger()` in `sentinel/feedback.py`. The contract is unchanged; `record_correction` and
+`list_corrections` are kept, and `list_corrections` now skips a corrupt line instead of failing.
+1. **Clean the corrections.** Labels are mapped to known classes case-insensitively. Unknown labels, no-ops
+   (corrected == predicted), empty text and exact copies of a validation ticket are skipped and counted in
+   `skipped_reasons`. The latest correction wins per (ticket, head), even when corrections arrive out of order.
+2. **Build the challenger.** It is the champion with only the corrected heads refit on the train slice plus the
+   corrections, each correction weighted 5, then recalibrated on validation. Each refit reuses the champion's
+   vocabulary and starts from its coefficients, so it reaches the same objective in seconds. Untouched heads are
+   shared, not copied.
+3. **Gate on the validation slice.** Type Macro-F1, priority Macro-F1 and high-priority-incident recall may not
+   drop at all. Queue Macro-F1 may drop by at most 0.005, about 3 tickets in a small class (see below).
+4. **Promote.** The old model is backed up as `triage_model.backup-<time>.joblib` (the newest 3 are kept) and the
+   new one is written atomically. The model object the running pipeline already holds is updated in place, so
+   the app uses the new heads at once, and `triage._CACHED = None` so the next `get_model()` loads the file.
+5. **Remember the result.** It is stored in `data/sentinel/retrain_state.json`. A repeat click with no new
+   corrections returns in under 1 s with `status: "kept_champion"`, `cached: true` and the earlier verdict in
+   `last_result`. Only one retrain runs at a time, and it never raises: problems come back as `status: "error"`
+   with a message.
+- **The holdout is never opened.** Only `kb_train.csv` is read, and a test fails if the holdout file is touched.
+- `sentinel/triage.py`: the model now saves `corrections_used`.
+- `tests/test_feedback.py`: 19 offline tests on a synthetic kb and model in tmp_path. They cover cleaning, the
+  fast paths, validation-copy skipping, a missing model, broken input, the lock, the holdout guard, a real
+  decision with numbers, corrections moving the label, promotion with backup and in-place update, every gated
+  metric, the queue tolerance, caching, backup pruning and the public entry point.
+
+**Real run** (full data, 6 corrections in a scratch file on hand-written tickets; 4 were no-ops because the model
+was already right):
+
+| validation (2,287) | champion | challenger |
+|---|---|---|
+| type_macro_f1 | 0.8653 | 0.8653 |
+| queue_macro_f1 | 0.5672 | 0.5657 |
+| priority_macro_f1 | 0.6208 | 0.6208 |
+| hpi_recall | 0.6650 | 0.6650 |
+
+- **Promoted** in 37 s, with 2 corrections used and heads type and queue refit. The second click was cached,
+  0.8 s, `kept_champion`.
+- **Effect:** "Wrong salary ... tax class" moved from Returns and Exchanges to **Human Resources** (P=0.99) in the
+  already-running model object. "VPN down since the firewall update" stays Problem (P(Incident)=0.09): one
+  correction at weight 5 is not enough against the many VPN-outage tickets the dataset labels Problem.
+- **Cleanup:** afterwards I restored the Step 3 model and removed the run's state and backup files, so the local
+  model has `corrections_used: 0`. The backup was byte-identical to the pre-promotion model (md5 match).
+
+**Design decisions backed by data** (same 2 corrections; changes vs champion on validation):
+
+| correction weight | type F1 | queue F1 | priority F1 | HPI recall | salary -> HR | VPN -> Incident |
+|---|---|---|---|---|---|---|
+| 0 (control) | 0 | 0 | 0 | 0 | no | no |
+| **5 (chosen)** | 0 | -0.0015 | 0 | 0 | yes | no |
+| 20 | +0.0007 | +0.0003 | 0 | **-0.0051** | yes | yes |
+
+- **The weight-0 control matches the champion exactly**, so differences come from the corrections, not from the
+  warm start. Weight 20 fixes both tickets but costs safety recall, so 5 stays.
+- **The queue tolerance corrects my first version.** It also blocked any queue drop, which is stricter than the
+  plan. The plan gates on type and priority Macro-F1 and HPI recall; a 0.0015 queue dip (about one ticket)
+  blocked an otherwise neutral challenger.
+
+**Cost:** about 35 s per retrain, mostly the train-slice tf-idf pass (16 s) and validation scoring. Peak memory
+is about 570 MB during a retrain (tracemalloc), freed afterwards; nothing is cached across clicks. My first
+version cached the train features and copied them per head, and it ran out of memory on this machine.
+
+**Verified:** `pytest -q` -> 109 passed. Contract tests pass and stay fast while there are no corrections.
+
+**For Kaushik (how to call it)**
+- **Save a correction** from the agent panel:
+
+  ```python
+  from sentinel import feedback, triage
+  from shared.contracts import LabelCorrection
+  feedback.record_correction(LabelCorrection(
+      ticket_id=rec.ticket_id,
+      text=f"{rec.subject or ''}\n{rec.body}".strip(),  # exactly what the classifier saw
+      head="queue",                                    # "type" | "queue" | "priority"
+      predicted=str(res.triage.queue),
+      corrected=choice))                               # one of triage.get_model().classes["queue"]
+  ```
+
+  Offer `triage.get_model().classes[head]` in a selectbox (request filed); a typo'd free-text label is skipped.
+- **Retrain button:** `out = feedback.retrain_challenger()` takes about 35 s the first time; keep the spinner.
+  - Show `out["status"]` and `out["message"]`, then `out["champion"]` vs `out["challenger"]` (the 4 metrics
+    plus `validation_tickets`).
+  - `out["corrections_used"]`, `out["corrections_skipped"]` and `out["skipped_reasons"]` explain what was learned.
+  - `out["cached"] is True` means nothing new: show the message and `out["last_result"]`.
+  - `"error"` always carries a readable message. Nothing to reload: the running agent's model is updated in place.
+- **Rollback by hand:** copy `data/sentinel/triage_model.backup-<newest>.joblib` over `triage_model.joblib` and
+  restart the app.
+
+**For Je:** `test_return_types` will run a real retrain once corrections exist (request filed). Holdout scores
+after a promotion include the corrections in training; if corrections came from holdout tickets replayed in the
+demo, re-score from a fresh `make sentinel-train`.

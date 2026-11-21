@@ -28,3 +28,32 @@ The same happens to every teammate with an uncommitted edit, so the check fails 
 The triage confidences are now calibrated (temperature: type T=0.89, queue T=0.81, priority T=1.43), so
 `make tune` and `make dial` results computed on the old model's probabilities are stale. Retrain with
 `make sentinel-train` (about 3.5 min) or take my model, then re-run both. Details are in docs/progress/Shishir.md, Step 2.
+
+## To Je - tests/test_team_contracts.py::test_return_types runs a REAL retrain once corrections exist
+
+**What:** `test_return_types` calls `feedback.retrain_challenger()` twice with the real settings. While
+`data/sentinel/corrections.jsonl` is empty or missing it returns in milliseconds. Once agents save corrections
+in the UI, the first call retrains for real (about 35 s), can **promote a new model** over
+`data/sentinel/triage_model.joblib` (with a backup), and makes the "~1 s" contract test slow. The second call
+is cached and instant.
+
+**Suggested change:** isolate it like `test_label_correction_roundtrip` already does, e.g.
+
+```python
+def test_return_types(tmp_path, monkeypatch):
+    ...
+    monkeypatch.setattr(feedback, "get_settings", lambda: Settings(corrections_path=tmp_path / "c.jsonl"))
+    assert isinstance(feedback.retrain_challenger(), dict)
+```
+
+No contract change: with no corrections it returns `{"status": "kept_champion", ...}` without training.
+
+## To Kaushik - ui/pages/agent.py "Correct labels" form: offer the known labels, not free text
+
+**What:** `retrain_challenger()` only learns from corrections whose label is a known class for that head. It
+matches case-insensitively, so "High" works, but a typo like "Hardware" is skipped and reported in
+`skipped_reasons`. A free `st.text_input` will lose corrections.
+
+**Suggested change:** `st.selectbox(f"Corrected {head}", triage.get_model().classes[head], index=...)`, where
+`classes` is `{"type": [...], "queue": [...], "priority": [...]}` on the TriageModel. Also skip saving when the
+choice equals the prediction (the retrain ignores those anyway).

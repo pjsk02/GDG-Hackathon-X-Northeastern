@@ -139,6 +139,7 @@ class TriageModel:
         self.calibration_method: dict[str, str] = {}
         self.calibration_selection: dict[str, dict[str, dict[str, float]]] = {}
         self.calibrated_on = 0
+        self.corrections_used = 0  # agent label corrections in the training data (feedback.py)
 
     @property
     def is_calibrated(self) -> bool:
@@ -302,6 +303,7 @@ class TriageModel:
                 "calibration_method": self.calibration_method,
                 "calibration_selection": self.calibration_selection,
                 "calibrated_on": self.calibrated_on,
+                "corrections_used": self.corrections_used,
                 "classes": self.classes,
                 "sklearn_version": sklearn.__version__,
                 "saved_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
@@ -325,6 +327,7 @@ class TriageModel:
         model.calibration_method = parts.get("calibration_method", {})
         model.calibration_selection = parts.get("calibration_selection", {})
         model.calibrated_on = parts.get("calibrated_on", 0)
+        model.corrections_used = parts.get("corrections_used", 0)
         return model
 
     def metadata(self) -> dict[str, object]:
@@ -332,6 +335,7 @@ class TriageModel:
             "trained_on": self.trained_on,
             "calibrated": self.is_calibrated,
             "calibrated_on": self.calibrated_on,
+            "corrections_used": self.corrections_used,
             "calibration_method": dict(self.calibration_method),
             "temperatures": {h: round(c, 4) for h, c in self.calibrators.items() if isinstance(c, float)},
             "classes": self.classes,
