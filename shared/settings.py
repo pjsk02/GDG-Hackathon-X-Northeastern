@@ -53,6 +53,17 @@ class Settings(BaseSettings):
     # --- grounding --------------------------------------------------------
     min_confidence: float = 0.5
 
+    # --- SentinelDesk -----------------------------------------------------
+    # Its own index file, so the scaffold's sample/bench indexes never mix with 22k tickets.
+    sentinel_memory_path: Path = Path("data/sentinel.sqlite")
+    sentinel_top_k: int = 5
+    # Escalation gate thresholds (see sentinel/escalation.py for what each rule does).
+    triage_confidence_min: float = 0.65
+    retrieval_similarity_min: float = 0.55
+    high_priority_alert_probability: float = 0.45
+    # Mask emails/phones/IPs/IBANs out of the text sent to any LLM (the console still shows the original).
+    mask_pii_in_prompts: bool = True
+
 
 @lru_cache
 def get_settings() -> Settings:

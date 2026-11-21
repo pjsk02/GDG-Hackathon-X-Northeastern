@@ -104,6 +104,133 @@ class AskRequest(BaseModel):
     fallback: bool = True
 
 
+# --------------------------------------------------------------------------
+# SentinelDesk: incident triage, escalation and precedent-grounded resolution.
+#
+#   TicketInput -> triage (classifier) -> retrieve precedents -> SentinelDraft (LLM, untrusted)
+#               -> citation grounding + escalation gate -> SentinelResult (what the UI renders)
+# --------------------------------------------------------------------------
+
+Language = Literal["en", "de"]
+EscalationDecision = Literal["AUTO_DRAFT", "ESCALATE"]
+
+
+class TicketInput(BaseModel):
+    subject: str | None = Field(default=None, description="May be null/empty: 13% of the dataset has no subject.")
+    body: str
+    k: int | None = Field(default=None, description="How many precedents to retrieve.")
+    provider: str | None = None
+    fallback: bool = True
+
+
+class Precedent(BaseModel):
+    """A past resolved ticket offered as evidence. Everything here comes from the index."""
+
+    ticket_id: str
+    similarity: float
+    subject: str
+    body_snippet: str
+    answer: str
+    type: str
+    queue: str
+    priority: str
+    language: str
+
+
+class DraftCitation(BaseModel):
+    """Model output: which past ticket backs a sentence, and the span it was taken from."""
+
+    ticket_id: str = Field(description="A TKT-xxxxx id from the retrieved precedents.")
+    evidence_quote: str = Field(description="A verbatim, contiguous span copied from that ticket's resolution.")
+
+
+class SentinelDraft(BaseModel):
+    """Raw LLM output. Nothing here reaches an operator before citation grounding.
+
+    Field order is deliberate: a model fills a JSON schema top to bottom, so it must copy its
+    evidence *before* it writes the reply. Asked the other way round it writes fluent prose first
+    and then looks for quotes to justify it, which is exactly the failure mode being prevented.
+    """
+
+    reply_language: Language = Field(description="The requester's language, detected from their text.")
+    refused: bool = Field(description="True when the precedents do not support a safe answer.")
+    refusal_reason: str = Field(default="", description="One short sentence; empty unless refused.")
+    citations: list[DraftCitation] = Field(
+        description="Required unless refused: the quotes the reply is built from. [] only when refused."
+    )
+    draft_reply: str = Field(default="", description="The reply, written in reply_language. Empty when refused.")
+
+
+class VerifiedCitation(BaseModel):
+    """A citation whose quote was found verbatim in the cited ticket's historical resolution."""
+
+    ticket_id: str
+    evidence_quote: str
+    similarity: float
+
+
+CitationRejectionKind = Literal[
+    "unknown_ticket",    # cites a ticket that was not retrieved (invented precedent)
+    "quote_too_short",   # quote missing or too short to verify
+    "quote_not_found",   # quote is not verbatim in that ticket's resolution
+]
+
+
+class CitationRejection(BaseModel):
+    citation: DraftCitation
+    reason: str
+    kind: CitationRejectionKind
+
+
+class TriageLabels(BaseModel):
+    type: str
+    queue: str
+    priority: str
+    type_confidence: float
+    queue_confidence: float
+    priority_confidence: float
+    triage_confidence: float = Field(description="The weakest head; what the escalation gate thresholds on.")
+    type_probabilities: dict[str, float] = Field(default_factory=dict)
+    queue_probabilities: dict[str, float] = Field(default_factory=dict)
+    priority_probabilities: dict[str, float] = Field(default_factory=dict)
+
+
+class SentinelResult(BaseModel):
+    """One triaged ticket, end to end. This is what the console and the API return."""
+
+    subject: str | None
+    body: str
+    detected_language: Language
+    language_confidence: float
+
+    triage: TriageLabels
+    escalation: EscalationDecision
+    escalation_reasons: list[str] = Field(default_factory=list)
+
+    precedents: list[Precedent] = Field(default_factory=list)
+    top_similarity: float = 0.0
+
+    draft_reply: str | None = None
+    cited_ticket_ids: list[str] = Field(default_factory=list)
+    verified_citations: list[VerifiedCitation] = Field(default_factory=list)
+    rejected_citations: list[CitationRejection] = Field(default_factory=list)
+    grounded: bool = Field(default=False, description="At least one citation survived verification.")
+    refused: bool = False
+    refusal_reason: str = ""
+
+    pii_masked: bool = False
+    pii_found: dict[str, int] = Field(default_factory=dict)
+
+    provider: str = ""
+    model: str = ""
+    fell_back: bool = False
+    attempts: list[ProviderAttempt] = Field(default_factory=list)
+    error: str | None = None
+
+    latency_ms: float = 0.0
+    stage_latency_ms: dict[str, float] = Field(default_factory=dict)
+
+
 class EvalCase(BaseModel):
     id: str
     question: str

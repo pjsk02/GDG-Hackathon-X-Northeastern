@@ -164,14 +164,33 @@ class TriageModel:
     # -- persistence ------------------------------------------------------
 
     def save(self, path: Path | str = MODEL_PATH) -> Path:
+        # Pickle the parts, not `self`: `python -m sentinel.triage` would otherwise bake a
+        # `__main__.TriageModel` reference into the file that no importing process can resolve.
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        joblib.dump(self, path, compress=3)
+        joblib.dump(
+            {
+                "vectorizer": self.vectorizer,
+                "heads": self.heads,
+                "lang_vectorizer": self.lang_vectorizer,
+                "lang_head": self.lang_head,
+                "trained_on": self.trained_on,
+            },
+            path,
+            compress=3,
+        )
         return path
 
     @staticmethod
     def load(path: Path | str = MODEL_PATH) -> "TriageModel":
-        return joblib.load(path)
+        parts = joblib.load(path)
+        model = TriageModel()
+        model.vectorizer = parts["vectorizer"]
+        model.heads = parts["heads"]
+        model.lang_vectorizer = parts["lang_vectorizer"]
+        model.lang_head = parts["lang_head"]
+        model.trained_on = parts.get("trained_on", 0)
+        return model
 
 
 _CACHED: TriageModel | None = None
