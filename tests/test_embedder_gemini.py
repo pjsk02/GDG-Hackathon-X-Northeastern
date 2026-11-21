@@ -23,7 +23,8 @@ class FakeModels:
         self.dim = dim
 
     def embed_content(self, model, contents, config):
-        self.calls.append({"model": model, "contents": list(contents), "task_type": config.task_type})
+        self.calls.append({"model": model, "contents": list(contents), "task_type": config.task_type,
+                           "dim": config.output_dimensionality})
         if self.failures:
             raise self.failures.pop(0)
         # Deterministic, non-unit vectors so normalization is visible.
@@ -58,6 +59,17 @@ def test_task_type_follows_is_query():
     emb.embed(["doc"])
     emb.embed(["question"], is_query=True)
     assert [c["task_type"] for c in models.calls] == ["RETRIEVAL_DOCUMENT", "RETRIEVAL_QUERY"]
+
+
+def test_requests_768_dims_by_default():
+    models = FakeModels()
+    emb, _ = _embedder(models)
+    emb.embed(["doc"])
+    assert models.calls[0]["dim"] == 768
+    models2 = FakeModels()
+    emb2, _ = _embedder(models2, output_dim=None)
+    emb2.embed(["doc"])
+    assert models2.calls[0]["dim"] is None
 
 
 def test_batches_keep_order():

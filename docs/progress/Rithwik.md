@@ -199,3 +199,19 @@ It raises `ValueError` if none of the given tickets belong to the alert.
 **Open issues**
 - Still waiting on a working Gemini key for Step 1's smoke index and Step 2's Gemini index + numbers.
 - With the hash index every demo ticket is ESCALATE / PAGE_ONCALL (gate owned by Kaushik/Je); re-check with Gemini.
+
+## Step 1 follow-up - Gemini smoke index done; Step 2 rate-limit check
+
+**Step 1 closed**: with a working key, `EMBED_PROVIDER=gemini python -m sentinel.ingest_tickets --reset --limit 50`
+indexed 50 tickets (`gemini-gemini-embedding-001`, 768 dims). It took 33 s because the call hit the per-minute
+limit and the embedder's backoff waited it out, which is exactly what the retry is for.
+
+**Change**: `GeminiEmbedder` now asks for 768 dimensions (`output_dim=768`, `None` = model default 3072).
+gemini-embedding-001 is trained so the 768 prefix keeps nearly all the quality; the full index drops from ~280 MB of
+vectors to ~70 MB and search is 4x faster. Test added (15 embedder tests).
+
+**Rate limit (measured, free tier)**: `EmbedContentRequestsPerMinutePerUserPerProjectPerModel-FreeTier` = 100,
+and every text in a batch counts as one request (100 texts accepted in 3.6 s, then 429 with retryDelay ~40 s).
+Google's published free-tier daily cap is 1,000 requests. So the full index (22,869 tickets) is ~3.8 h at best and
+not possible in one day on the free tier. Options: enable billing on the key's project (paid tier; ~2.4M tokens
+at $0.15 per 1M tokens is roughly $0.40 for the whole index), or index a subset.
