@@ -104,10 +104,14 @@ class GeminiEmbedder:
         max_retries: int = 6,
         backoff_s: float = 2.0,
         max_backoff_s: float = 60.0,
+        output_dim: int | None = 768,
     ):
         if not api_key:
             raise ValueError("EMBED_PROVIDER=gemini needs GEMINI_API_KEY in .env")
         self.api_key, self.model, self.batch_size, self.timeout = api_key, model, batch_size, timeout
+        # gemini-embedding-001 returns 3072 dims by default; it is trained so a 768 prefix keeps nearly all the
+        # quality at a quarter of the index size and search time. None = model default.
+        self.output_dim = output_dim
         self.max_retries, self.backoff_s, self.max_backoff_s = max_retries, backoff_s, max_backoff_s
         self.name = f"gemini-{model}"
         self._client = None  # created on first use; tests inject a fake
@@ -145,7 +149,7 @@ class GeminiEmbedder:
         from google.genai import types
 
         client = self._get_client()
-        config = types.EmbedContentConfig(task_type=task_type)
+        config = types.EmbedContentConfig(task_type=task_type, output_dimensionality=self.output_dim)
         for attempt in range(self.max_retries + 1):
             try:
                 resp = client.models.embed_content(model=self.model, contents=batch, config=config)
