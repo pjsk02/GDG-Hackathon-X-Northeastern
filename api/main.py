@@ -8,10 +8,11 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
 from agent.pipeline import Agent
@@ -20,6 +21,7 @@ from api.auth import PublicUser, Role, authenticate_user, issue_token, register_
 from sentinel import ticket_store
 from sentinel.outage import OutageTracker
 from sentinel.pipeline import SentinelAgent
+from sentinel.voice_intake import VoiceIntakeError, transcribe_ticket
 from shared.contracts import AgentAnswer, AskRequest, RetrievedChunk, SentinelResult, TicketInput
 
 A2UI_PAGE = Path(__file__).parent / "static" / "a2ui.html"
@@ -184,6 +186,26 @@ def auth_me(authorization: str | None = Header(default=None, alias="Authorizatio
     if user is None:
         raise HTTPException(401, "Authentication required")
     return user
+
+
+MAX_VOICE_BYTES = 20 * 1024 * 1024  # ~2 min of 16-bit 48 kHz mono WAV
+
+
+@app.post("/voice/transcribe")
+async def voice_transcribe(request: Request) -> dict[str, str]:
+    """Voice ticket intake for /desk: raw audio bytes (WAV) -> {subject, body, language} via Gemini.
+
+    The page puts the result into the ticket form; the user reviews it and submits through POST /triage as usual.
+    """
+    audio = await request.body()
+    if len(audio) > MAX_VOICE_BYTES:
+        raise HTTPException(413, "Recording too long; keep it under two minutes.")
+    mime = (request.headers.get("content-type") or "audio/wav").split(";")[0].strip()
+    try:
+        ticket = await run_in_threadpool(transcribe_ticket, audio, mime)
+    except VoiceIntakeError as e:
+        raise HTTPException(422, str(e)) from e
+    return ticket.model_dump()
 
 
 @app.post("/triage", response_model=SentinelResult | CustomerTriageResponse)
