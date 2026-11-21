@@ -128,3 +128,45 @@ The chosen point beats the defaults on both axes: higher recall and 3.5 points f
 - R6 (grounding) and R7 (injection) are not simulated, because they need a draft. They can only add escalations.
 - Shishir: `python -m eval.tune_thresholds --model <train-only.joblib>` uses your model once it exists.
 - sklearn 1.8 prints a FutureWarning for `n_jobs` in `sentinel/triage.py` (harmless; Shishir's file).
+
+## Step 3 - Safety dial data and chart (N2) (2026-11-21)
+
+**Built:** `eval/safety_dial.py` (`make dial`) and `tests/test_thresholds_dial.py` (5 offline tests).
+
+- Same validation signals as `make tune`: train-only triage model, index self-hit excluded, tiers via
+  `escalation.decide_tier`. Holdout not read.
+- Sweeps the 1,452-point threshold grid and keeps the **Pareto frontier**: the points that no other point beats on
+  both lower on-call rate and higher HPI recall, sorted lenient to strict (capped at 40, both ends kept). Each
+  frontier point is one position of the dial.
+- `chosen` = the thresholds in `data/sentinel/thresholds.json` evaluated on the same signals (falls back to the
+  tuning objective if that file is missing).
+
+### Output (local, gitignored)
+
+- `data/eval/safety_dial.json`, exactly in the agreed shape:
+  `{"generated_at", "split": "validation", "points": [{triage_confidence_min, high_priority_alert_probability,
+  retrieval_similarity_min, oncall_rate, review_rate, auto_rate, hpi_recall}], "chosen": {...same keys...}}`.
+  All values are floats; `escalation rate = oncall_rate + review_rate = 1 - auto_rate`.
+- `data/eval/safety_dial.png`: HPI recall against on-call workload, with the target line, the chosen point and the
+  settings defaults.
+
+| Dial position | on-call | HPI recall |
+|---|---|---|
+| most lenient | 25.3% | 70.3% |
+| settings defaults (0.55 / 0.50 / 0.55) | 64.9% | 87.8% (below the frontier) |
+| **chosen (0.40 / 0.25 / 0.55)** | **61.4%** | **90.1%** |
+| strictest | 88.8% | 100.0% |
+
+### Verified
+
+- `make dial`: exit 0, 40 dial points, JSON shape checked key by key, PNG written (71 KB) and inspected.
+- `pytest -q`: 71 passed (5 new).
+
+### For Kaushik (manager page, his Step 4)
+
+- The file is ready: `data/eval/safety_dial.json`. `data/` is gitignored, so generate it locally with
+  `make sentinel-split && EMBED_PROVIDER=hash make sentinel-index && make tune && make dial` (~2 min).
+- Plot `points` as the curve (x = `oncall_rate`, y = `hpi_recall`) and highlight `chosen`. The same chart is
+  pre-rendered at `data/eval/safety_dial.png` if you prefer `st.image`.
+- Until your three-tier `decide_tier` is merged, `review_rate` is 0 everywhere. Re-run `make tune && make dial`
+  after the merge.
