@@ -54,3 +54,31 @@
 1. Check the embedding rate limit, then `EMBED_PROVIDER=gemini make sentinel-index` (log time + throttling).
 2. `python -m eval.crosslingual_check` (hash vs gemini) and fill in the table.
 3. Upload data/sentinel.sqlite and put the team-only link here.
+
+## Step 3 - Ticket store on SQLite
+
+**Built**
+- sentinel/ticket_store.py now stores tickets in SQLite at `TICKET_STORE_PATH` (default data/tickets.sqlite).
+  Every contract function keeps its name, arguments and return type; `TicketRecord` is unchanged.
+  - `TicketStore(path)` class does the work; the module functions delegate to one shared store per process.
+  - Thread-safe: one connection behind a lock, writes in `BEGIN IMMEDIATE`, WAL mode and a 30 s busy timeout so
+    Streamlit and the API can share the file.
+  - Ids stay `SD-1001`, `SD-1002`, ...; `reset()` empties the table and ids restart at SD-1001.
+  - Results stored as `SentinelResult.model_dump_json()` and loaded back with `model_validate_json`.
+  - `list_tickets` is newest first, ties broken by insertion order.
+  - `save_result` / `set_status` on an unknown id raise `KeyError` (same as the in-memory version).
+  - Under pytest the module functions use a temp file, so `pytest` (incl. the contract test's `reset()`) never wipes
+    the demo store. `ticket_store.configure(path)` points them at a specific file.
+
+**Files**: sentinel/ticket_store.py, tests/test_ticket_store.py (new).
+
+**Verified**
+- `pytest -q tests/test_ticket_store.py` -> 13 passed: add/get, list by status, set_status, save_result round trip,
+  persistence across two store instances, two open instances, reset, 8 threads x 25 tickets concurrent writes,
+  two instances writing concurrently, configure().
+- `pytest -q` -> 86 passed (run 3 times, no flakes). data/tickets.sqlite is not created by the tests.
+
+**For teammates (Kaushik)**
+- Nothing to change: keep calling `ticket_store.add_ticket / get_ticket / list_tickets / save_result / set_status /
+  reset`. Tickets now survive a Streamlit restart; use `reset()` (or delete data/tickets.sqlite) for a clean demo.
+- Streamlit caches module state per process, which is fine: every process opens the same file.
