@@ -22,7 +22,7 @@ export GOOGLE_GENAI_USE_VERTEXAI=true GOOGLE_CLOUD_PROJECT=<project-id> GOOGLE_C
 ```
 Until then: Gemini drafting runs on the AI Studio key (free tier) or falls back to Ollama/extractive. Rithwik:
 the planned Gemini embedder (`memory/embedder.py`) needs the same switch so the index can be built on Vertex.
-Status: open
+Status: done (2026-11-21, Sujitha, commit 964efd0, merged in PR #6: agent/llm_router.py skips the key and uses ADC when GOOGLE_GENAI_USE_VERTEXAI=true). Rithwik's embedder switch is still open.
 
 ## 2026-11-21 -> Kaushik: queue page tests and "Group into one incident" break on current main (patch ready)
 File: tests/test_ui_queue.py, ui/shared.py (`render_outage_banner`)
@@ -49,7 +49,7 @@ pytest -q
 If your newer UI pushes already changed these lines and `git apply` refuses, make the same 3 edits by hand: the two
 `wait_idle` lines (+ `at.run()`), the real-module assertion instead of the fake, and `group_fn(alert, ticket_store.list_tickets())`.
 Until then: Kaushik-Branch stays unmerged; main is green (145 passed).
-Status: open
+Status: done (2026-11-21, Kaushik, commit 29c9384, merged in PR #7; full suite 444 passed on main).
 
 ```diff
 diff --git a/tests/test_ui_queue.py b/tests/test_ui_queue.py

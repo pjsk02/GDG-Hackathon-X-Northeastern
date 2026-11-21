@@ -17,7 +17,7 @@ Built in 6 hours for the GDG Hackathon x Northeastern on the
 | 1. Mask | Emails, phones, account ids and IPs are masked before any text reaches an LLM ("What the AI saw") | `sentinel/pii.py` |
 | 2. Classify | TF-IDF + logistic regression, one head each for type, queue and priority, plus language; calibrated on the validation slice | `sentinel/triage.py`, `sentinel/calibration.py` |
 | 3. Explain | The words that pushed each label ("why this label") | `sentinel/explain.py` |
-| 4. Retrieve | Nearest past resolved tickets from the knowledge base (Gemini embeddings; works across EN/DE) | `memory/`, `sentinel/ingest_tickets.py` |
+| 4. Retrieve | Nearest past resolved tickets from the knowledge base (EmbeddingGemma, multilingual, run locally through Ollama; works across EN/DE) | `memory/`, `sentinel/ingest_tickets.py` |
 | 5. Gate | Seven deterministic rules (R1-R7), each with a reason an operator can read, map to three tiers | `sentinel/escalation.py` |
 | 6. Draft | Gemini writes a reply in the customer's language citing past tickets; fallback local Gemma, then a no-AI quote | `sentinel/writer.py`, `agent/llm_router.py` |
 | 7. Verify | Every citation must appear verbatim in a retrieved resolution; every number, price, date or promise must appear in a cited quote | `sentinel/writer.py`, `sentinel/claims.py` |
@@ -42,7 +42,7 @@ flowchart LR
   end
   Q --> P[PII mask]
   P --> T[Triage model<br/>type · queue · priority<br/>+ confidence + why]
-  P --> R[Retrieve past tickets<br/>Gemini embeddings, SQLite]
+  P --> R[Retrieve past tickets<br/>EmbeddingGemma via Ollama, SQLite]
   T --> G{Safety gate<br/>R1-R5, R7}
   R --> G
   G -->|R1 R2 R5 R7| O[Page on-call]
@@ -60,8 +60,8 @@ flowchart LR
 | Layer | Tech |
 |---|---|
 | Classifier | scikit-learn TF-IDF (word + char n-grams) + logistic regression, calibrated |
-| Retrieval | Gemini embeddings (`EMBED_PROVIDER=gemini`), brute-force cosine in SQLite; hash embeddings for offline dev |
-| Drafting | Gemini with a JSON schema; fallback chain Gemini -> local Gemma (Ollama) -> extractive quote |
+| Retrieval | EmbeddingGemma 2 (570M, `EMBED_PROVIDER=ollama`, local through Ollama), brute-force cosine in SQLite over all 22,869 kb tickets; Gemini embeddings (`EMBED_PROVIDER=gemini`) supported; hash embeddings for offline dev |
+| Drafting | Gemini (gemini-3.5-flash-lite) with a JSON schema; fallback chain Gemini -> local Gemma 4 (Ollama) -> extractive quote |
 | App | Streamlit (agent board, customer, manager and queue pages), FastAPI (`POST /triage` with role-based views) |
 | Contracts | Pydantic models in `shared/contracts.py`, frozen and checked by `tests/test_team_contracts.py` |
 
@@ -74,7 +74,7 @@ uv venv --python 3.12 && uv pip install -e ".[all]"
 ```
 
 ```bash
-cp .env.example .env    # add GEMINI_API_KEY for Gemini drafting and embeddings; everything else runs offline
+cp .env.example .env    # add GEMINI_API_KEY for Gemini drafting; embeddings and the fallback writer run locally in Ollama
 ```
 
 ```bash
@@ -88,9 +88,9 @@ Then, with the venv active (`source .venv/bin/activate`, or `.venv\Scripts\activ
 |---|---|
 | `make sentinel-split` | 80/20 split (seed 42) + leakage report -> `data/sentinel/{kb_train,holdout_test}.csv` |
 | `make sentinel-train` | Train the triage model -> `data/sentinel/triage_model.joblib` |
-| `make sentinel-index` | Index kb_train for retrieval (`EMBED_PROVIDER=gemini` for the demo, `hash` for fast offline dev) |
-| `make tune` | Tune gate thresholds on the validation slice -> `data/sentinel/thresholds.json` |
-| `make dial` | Safety dial sweep -> `data/eval/safety_dial.json` + `.png` |
+| `make sentinel-index` | Index kb_train for retrieval (`EMBED_PROVIDER=ollama` with EmbeddingGemma for the demo, `hash` for fast offline dev) |
+| `make tune` | Tune gate thresholds on the validation slice -> `data/sentinel/thresholds.json`. To tune against the saved calibrated train-only model: `python -m eval.tune_thresholds --model data/sentinel/triage_model.joblib` |
+| `make dial` | Safety dial sweep -> `data/eval/safety_dial.json` + `.png` (same `--model` option: `python -m eval.safety_dial --model data/sentinel/triage_model.joblib`) |
 | `make sentinel-eval` | Full evaluation -> `data/eval/latest/report.json` (`python -m eval.sentinel_eval --sample 120 --compare gemini extractive`) |
 | `make console` | Streamlit app |
 | `pytest -q` | All tests, offline, a few seconds |
@@ -118,28 +118,34 @@ holdout id, and stops if it does.
 
 ### Metrics
 
-Holdout triage is scored on all 5,718 holdout tickets; end-to-end numbers on a 120-ticket holdout sample. Numbers are
-filled from `data/eval/latest/report.json` only.
+Holdout triage is scored on all 5,718 holdout tickets; end-to-end numbers on a 120-ticket holdout sample through the
+full pipeline (Gemini gemini-3.5-flash-lite writer, EmbeddingGemma retrieval). Final run 2026-11-21 with the calibrated
+train-only model and thresholds re-tuned on the validation slice. Numbers come from `data/eval/latest/report.json`,
+except the gate-recall row: that applies the tuned pre-draft gate (R1-R3, R5; no retrieval, so R4 is not counted) to
+every holdout ticket.
 
 | Metric | Value |
 |---|---|
-| Type Macro-F1 | _TBD (final run)_ |
-| Queue Macro-F1 | _TBD_ |
-| Priority Macro-F1 | _TBD_ |
-| High-priority-incident recall (via the gate) | _TBD_ |
-| Calibration error (ECE, before -> after) | _TBD_ |
-| Groundedness (drafts with a verified citation) | _TBD_ |
-| Citation rejection rate | _TBD_ |
-| Tier rates: auto-draft / agent review / on-call | _TBD_ |
-| Behaviour cases passed (adversarial + routine) | _TBD_ |
-| Latency p50 / p95 | _TBD_ |
+| Type Macro-F1 | 0.868 |
+| Queue Macro-F1 | 0.567 (10 classes) |
+| Priority Macro-F1 | 0.609 |
+| High-priority-incident recall (via the gate) | 88.2% paged on-call, 93.4% reach a human (995 holdout incidents; validation target 90%) |
+| Calibration error (ECE, before -> after) | type 0.013 -> 0.010 · queue 0.069 -> 0.008 · priority 0.065 -> 0.017 |
+| Groundedness (drafts with a verified citation) | 100% of drafts (99.2% of tickets; 1 of 120 refused) |
+| Citation rejection rate | 0% (241 citations verified, 0 rejected) |
+| Tier rates: auto-draft / agent review / on-call | 20.8% / 17.5% / 61.7% (validation: 26.2% / 14.1% / 59.7%) |
+| Behaviour cases passed (adversarial + routine) | 21 / 21 scored cases; all 18 adversarial cases escalated |
+| Latency p50 / p95 | 1.34 s / 6.59 s end to end |
+
+On-call stays near 60% by design: about 39% of tickets in the dataset are labelled high priority, and the gate is tuned
+to catch at least 90% of high-priority incidents. The safety dial on the manager page shows the trade-off.
 
 ## Bonus features
 
 - **Safety dial:** high-priority-incident recall against on-call workload across threshold settings (validation slice), on the manager page.
 - **Number-and-promise guard:** a "48 hours", "20% off" or "full refund" the cited tickets do not contain sends the draft to review.
 - **Why this label:** the words that pushed each prediction.
-- **Cross-lingual matching:** a German ticket finds the English fix (Gemini embeddings).
+- **Cross-lingual matching:** a German ticket can find the English fix (multilingual EmbeddingGemma embeddings).
 - **Smart priority queue:** urgent tickets jump the line with a cap on concurrent LLM calls; live view and a ticket simulator.
 - **Outage burst detection:** a burst of similar tickets raises a banner and groups into one incident.
 - **Learning loop:** agents correct labels; a challenger model is promoted only if validation holds.

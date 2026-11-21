@@ -283,3 +283,45 @@ On Je-Branch today (placeholder `decide_tier`, every escalation is on-call) `mak
 recall 0.901 at 0.610 on-call (was 0.614). Re-run `make tune && make dial` on merged main for the real values.
 
 Verified: `pytest -q` 82 passed (3 new tuning tests); `make tune` and `make dial` exit 0.
+
+## Step 6 - Integration and final numbers (2026-11-21)
+
+### Integration
+- Merged into main via GitHub PRs, each checked first (ownership of every changed file, trial merge on a scratch
+  worktree, full `pytest -q`): #4 Je, #5 Rithwik, #6 Sujitha, #7 Kaushik (Shishir was already in via #3).
+  No conflicts. Kaushik's branch was held until he applied the queue/incidents patch from docs/requests/Je.md
+  (it fixed 2 failing queue tests and a real TypeError in "Group into one incident"). Main after #7: 444 passed.
+- docs/requests/Je.md: both requests marked done (Sujitha 964efd0, Kaushik 29c9384).
+
+### Final numbers (local data/, not in git)
+- Found the saved triage model predated Shishir's step 2: trained on train+validation (22,869) and uncalibrated.
+  Backed it up (data/backup-*/), then `make sentinel-train`: train slice only (20,582), temperature calibration on
+  validation. ECE type 0.013->0.010, queue 0.069->0.008, priority 0.065->0.017.
+- Re-tuned on validation against that model (Shishir's request): `python -m eval.tune_thresholds --model
+  data/sentinel/triage_model.joblib` -> conf_min 0.55, p_high_alert 0.27, sim_min 0.86. Validation: HPI recall
+  0.901, on-call 0.597, review 0.141, auto 0.262, mistriage caught 0.806 (was 0.640 at review 0.0).
+  `python -m eval.safety_dial --model ...` picks the same point.
+- Index unchanged: data/sentinel.sqlite = all 22,869 kb tickets, EmbeddingGemma 2 570M via Ollama; 0 holdout ids.
+- `python -m eval.sentinel_eval` (120 holdout tickets, Gemini gemini-3.5-flash-lite): groundedness 100% of drafts,
+  0/241 citations rejected, tiers 20.8/17.5/61.7%, 21/21 behaviour cases, p50 1.34 s / p95 6.59 s, 0 errors.
+- Gate recall on the full holdout with the tuned thresholds (evaluation-only script, no retrieval): 88.2% of the
+  995 high-priority incidents paged on-call, 93.4% reach a human. Note: triage.py's
+  `high_priority_incident_recall_via_gate` (0.745) only counts top-label "high" and ignores R2; it understates
+  the gate.
+- README: metrics table filled; retrieval described as EmbeddingGemma via Ollama (it said Gemini embeddings);
+  tune/dial commands with `--model` documented.
+
+### Verified
+- `pytest -q` and contract tests (see commit); README numbers cross-checked against data/eval/latest/report.json
+  and data/sentinel/thresholds.json.
+- Live checks: console (8501) and API `/desk` (8000) run; API `/triage` and the console presets triage with the real
+  model, index and Gemini.
+
+### Open issues / for teammates
+- Demo rehearsal (run the script twice with a timer) still to do on the demo laptop: needs a human.
+- Makefile `tune`/`dial` do not pass `--model` (shared file; change on main). Until then use the commands above.
+- Kaushik: R2 reason text reads "although the top label is 'high'" when it is high (Shishir's request); outage
+  tracker gets no ticket ids; per-session trackers; `/desk` loads Tailwind from a CDN (needs internet).
+- Rithwik: Vertex switch in memory/embedder.py still open; check_ownership.py first-letter bug (shared file).
+- Optional: "Replay real tickets" (holdout subject+body only, no labels, no corrections fed back) for a live stream.
+- Gemini credit (GDG NEU, $25) expires 2026-11-21; the fallback is local Gemma 4 via Ollama.
