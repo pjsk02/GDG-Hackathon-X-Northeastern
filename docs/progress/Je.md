@@ -170,3 +170,54 @@ The chosen point beats the defaults on both axes: higher recall and 3.5 points f
   pre-rendered at `data/eval/safety_dial.png` if you prefer `st.image`.
 - Until your three-tier `decide_tier` is merged, `review_rate` is 0 everywhere. Re-run `make tune && make dial`
   after the merge.
+
+## Step 4 - Evaluation upgrades (2026-11-21)
+
+**Built:** `eval/sentinel_eval.py` extended, 5 new cases in `eval/sentinel_cases.jsonl`, and
+`tests/test_eval_sentinel.py` (8 offline tests with a fake agent).
+
+- **Tier rates** from `result.tier` (`tier_auto_draft_rate`, `tier_agent_review_rate`, `tier_oncall_rate`). If
+  the tier is missing it falls back to the placeholder mapping. Also **guard findings per ticket**
+  (`guard_findings_total/_per_ticket`, `tickets_with_guard_findings`) and **injection hits**
+  (`injection_hits`, `injection_hit_rate`). The per-ticket CSV gains `tier`, `n_guard_findings`,
+  `guard_findings` and `n_injection_flags`.
+- **Calibration:** if `sentinel/calibration.py` exists, `report(model, holdout)` goes into
+  `report["calibration"]` with `available: true`. Otherwise it is a clean skip with a reason.
+- **Behaviour cases** load from `eval/sentinel_cases.jsonl` and, if present, Sujitha's `eval/cases_guardrails.jsonl`.
+  A duplicate id gets the file name prefixed, and each row records its `source`. New optional expectations:
+  `expect_tier_not`, `expect_precedent_language`, `expect_guard_safe` (alongside `expect_escalation`). Summary:
+  `behaviour_pass_rate` over every case with an expectation, plus `adversarial_escalation_rate`.
+- **5 new cases:** `xling-de-printer` (German ticket should hit an English fix), `trap-reply-numbers` (hours /
+  date / percent bait), `adv-injection-de`, `outage-empty-subject`, `routine-password-reset` (must not page on-call).
+- **Always writes `data/eval/latest/report.json`** (also with `--triage-only`), plus `latest/chart.png`. The report
+  also records the live `thresholds` and the `run_dir`.
+
+### Result: `python -m eval.sentinel_eval --sample 20 --compare extractive` (hash index, tuned thresholds)
+
+Runs end to end. Leakage `ok: True` (22,869 indexed, 0 outside kb, 0 holdout ids). Calibration: skipped (not merged).
+
+| End to end (20 holdout tickets, extractive) | | Behaviour (16 cases) | |
+|---|---|---|---|
+| groundedness | 1.00 | behaviour pass rate (13 scored) | 0.846 |
+| tier auto / review / on-call | 0.20 / 0.00 / 0.80 | adversarial escalation (10) | 1.00 |
+| guard findings per ticket | 0.00 | injection hits | 0 (detector still a stub) |
+| citation rejection | 0.00 | PII cases masked | 1 |
+| language match | 1.00 | | |
+| latency p50 / p95 | 3.2 / 3.3 ms | | |
+
+Two misses, both expected with today's stubs, not code bugs:
+- `xling-de-printer`: top precedent is German. The hash index is monolingual; this needs Rithwik's Gemini index.
+- `routine-password-reset`: escalated by R4 (similarity 0.49 < 0.55), and the placeholder `decide_tier` sends
+  every escalation to on-call. With Kaushik's mapping R4 becomes agent review, which passes.
+
+### Verified
+
+- `python -m eval.sentinel_eval --sample 20 --compare extractive`: exit 0, `data/eval/latest/report.json` written.
+- `pytest -q`: 79 passed (8 new).
+
+### Notes for teammates
+
+- Kaushik: the manager page can read `data/eval/latest/report.json` → `triage` (holdout metrics),
+  `pipeline.<provider>` (tier rates, groundedness, latency), `pipeline.<provider>.behaviour`, `calibration`.
+- Shishir: `report(model, df) -> dict` in `sentinel/calibration.py` is picked up automatically.
+- Sujitha: `eval/cases_guardrails.jsonl` is picked up automatically; the optional `expect_*` fields above work there too.
