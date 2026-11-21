@@ -48,3 +48,26 @@ GEMINI_THINKING_LEVEL=low
 ### Open issues / notes for teammates
 - None blocking. Hash retrieval missed semantic matches for the VPN and printer tickets (causing Gemini to correctly refuse); once Rithwik's Gemini embeddings index lands, grounded rate on those topics should improve.
 - Notice on tickets #4 and #5, Gemini sometimes cites two quotes from the same `ticket_id` (both verified verbatim); `cited_ticket_ids` in `pipeline.py` keeps duplicates (`['TKT-18411', 'TKT-18411']`), which is fine for now.
+
+## Step 2: Number-and-promise guard (N4)
+
+### What was built
+- Implemented `check_claims(reply: str, verified: list[VerifiedCitation]) -> list[GuardFinding]` in `sentinel/claims.py` (exact contract preserved):
+  - Masks out ticket IDs (`TKT-\d+`, case-insensitive) and PII placeholders (`<[A-Z0-9_]+>`, e.g. `<IPV4>`, `<EMAIL>`) so they are never flagged as numbers and cannot falsely back numeric claims.
+  - Extracts EN and DE claims with span-masking across numeric kinds (`money` -> `percent` -> `date` -> `number`) so specific spans (`$500`, `5000 EUR`, `99.9%`, `15 Prozent`, `24 hours`, `48 Stunden`, `within 2 days`, `bis Freitag`, `2026-11-21`, `21.11.2026`) are not double-counted as bare numbers.
+  - Independently detects EN and DE commitment/promise phrases (`we guarantee`, `full refund`, `free of charge`, `wir erstatten`, `kostenlos`, `wir garantieren`, `vollständige Rückerstattung`, etc.) so combined claims flag both the promise and any unbacked money/date/percent.
+  - Verifies each extracted claim against normalized `verified` quotes (case- and whitespace-insensitive, flexible currency/percent symbol spacing, boundary-aware numeric edges so `"5"` is not falsely backed by `"50"` or `"1.5"`). Deduplicates findings while preserving order of appearance.
+- Created `tests/test_claims.py` with 24 test functions (**49 parametrized cases**) covering EN and DE pass/fail cases, ticket ID & PII ignoring, partial-digit trap (`5` vs `50`), combined claims, multi-citation backing, and `extractive_draft` compatibility.
+
+### Files changed
+- `sentinel/claims.py`
+- `tests/test_claims.py`
+- `docs/progress/Sujitha.md`
+
+### Verification
+- `.venv/bin/pytest -q tests/test_claims.py`: **49 passed, 0 failed**.
+- `.venv/bin/pytest -q`: **112 passed, 0 failed** (verified via `test-runner`).
+- `.venv/bin/python scripts/check_ownership.py`: **OK** (verified via `ownership-reviewer` + post-commit check).
+
+### Open issues / notes for teammates
+- None. `sentinel/pipeline.py` already invokes `claims.check_claims(drafted.draft_reply or "", verified)` and surfaces every `GuardFinding` in `result.guard_findings` and `R6 unbacked <kind> in draft: '<text>'` escalation reasons.
