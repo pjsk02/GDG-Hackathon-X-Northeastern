@@ -27,3 +27,30 @@
 
 **For teammates**
 - Nothing changes for you: default `EMBED_PROVIDER=hash` still returns `HashEmbedder`.
+
+## Step 2 - Demo index and cross-lingual check (B1) - PARTIAL (Gemini part waits on a working key)
+
+**Built**
+- eval/crosslingual_check.py: for the 958 German VALIDATION tickets, searches the kb_train index (skipping the ticket
+  itself) and reports `share_topk_english`, `top1_english`, `top1_same_queue`, `top1_score_mean` per embedder.
+  Writes data/eval/crosslingual.json. Holdout never read.
+  - Each embedder has its own index file (chunk ids are ticket ids): gemini -> data/sentinel.sqlite (demo index),
+    others -> data/eval/crosslingual_<provider>.sqlite, built on demand for hash (~5 s).
+  - Queries are embedded in batches (64 per Gemini call), so the gemini run costs ~15 calls, not 958.
+- memory/store.py: new `VectorStore.vectors()` -> (ids, matrix) for batch scoring. No existing behaviour changed.
+
+**Numbers so far (k=5, 958 German validation tickets)**
+
+| embedder | share top-5 English | top-1 English | top-1 same queue | mean top-1 score |
+|---|---|---|---|---|
+| hash | 0.186 | 0.181 | 0.568 | 0.688 |
+| gemini | pending key | | | |
+
+**Files**: eval/crosslingual_check.py (new), tests/test_crosslingual_check.py (new), memory/store.py.
+
+**Verified**: `pytest -q tests/test_crosslingual_check.py` -> 4 passed; `python -m eval.crosslingual_check --providers hash`.
+
+**Still to do once the key works**
+1. Check the embedding rate limit, then `EMBED_PROVIDER=gemini make sentinel-index` (log time + throttling).
+2. `python -m eval.crosslingual_check` (hash vs gemini) and fill in the table.
+3. Upload data/sentinel.sqlite and put the team-only link here.

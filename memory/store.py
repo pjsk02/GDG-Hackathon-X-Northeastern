@@ -106,6 +106,10 @@ class VectorStore:
                 break
         return results
 
+    def vectors(self) -> tuple[list[str], np.ndarray]:
+        """(chunk ids, unit vectors) for this store's embedder, for batch scoring (eval scripts)."""
+        return self._matrix()
+
     def _matrix(self) -> tuple[list[str], np.ndarray]:
         if self._cache is None:
             # Stream the cursor into one preallocated array instead of fetchall() + np.stack:
