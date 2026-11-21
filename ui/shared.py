@@ -159,8 +159,13 @@ def render_outage_banner(tracker: OutageTracker, *, key_prefix: str = "banner") 
         if group_fn is None:
             st.info("`incidents.group_burst` is not available yet.")
             return
-        grouped = group_fn(alert)
-        st.success(f"Grouped burst into one incident: {grouped}")
+        try:
+            incident = group_fn(alert, ticket_store.list_tickets())
+        except ValueError as e:  # none of the stored tickets belong to this alert
+            st.warning(f"Could not group this burst: {e}")
+            return
+        st.success(f"Grouped {len(incident.ticket_ids)} tickets into {incident.incident_id}: {incident.title}")
+        st.markdown(incident.status_update)
 
 
 def highlight(text: str, quotes: list[str]) -> str:

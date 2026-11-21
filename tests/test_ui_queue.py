@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
-from types import ModuleType
 
 import pandas as pd
 
@@ -62,6 +60,7 @@ def test_fire_burst_and_outage_banner_raises_alert():
     q = SmartQueue(agent, concurrency=2)
     fired = fire_burst(q)
     assert fired == 10
+    assert q.wait_idle(timeout=30)  # the real SmartQueue works in background threads
     assert q.stats().done == 10
 
     tracker = OutageTracker()
@@ -85,12 +84,6 @@ def test_queue_page_apptest_fire_10_and_concurrency_and_group_burst(monkeypatch)
     monkeypatch.setattr("ui.shared.get_agent", lambda: agent)
     monkeypatch.setattr("ui.shared.get_queue", lambda _a: q)
 
-    # Provide a fake sentinel.incidents module to verify "Group into one incident" button
-    fake_incidents = ModuleType("sentinel.incidents")
-    grouped_calls: list[object] = []
-    fake_incidents.group_burst = lambda alert: grouped_calls.append(alert) or "INC-001"  # type: ignore[attr-defined]
-    monkeypatch.setitem(sys.modules, "sentinel.incidents", fake_incidents)
-
     queue_page = Path(__file__).resolve().parents[1] / "ui/pages/queue.py"
     at = AppTest.from_file(queue_page, default_timeout=15)
     at.run()
@@ -105,11 +98,16 @@ def test_queue_page_apptest_fire_10_and_concurrency_and_group_burst(monkeypatch)
     fire_btn = next(b for b in at.button if b.key == "fire_10_btn")
     fire_btn.click().run()
     assert not at.exception
+    assert q.wait_idle(timeout=30)  # background workers finish the burst
+    at.run()  # AppTest does not run the 1 s live fragment; re-render so the banner sees the done tickets
+    assert not at.exception
     assert q.stats().done == 10
 
     # Banner should now be visible with "Group into one incident" button
     group_btn = next(b for b in at.button if b.key == "queue_group_burst")
     group_btn.click().run()
     assert not at.exception
-    assert len(grouped_calls) == 1
+    # Rithwik's real sentinel.incidents.group_burst(alert, tickets) grouped the burst
+    # (only the VPN outage tickets of the mixed burst belong to the incident)
+    assert any(s.value.startswith("Grouped ") and "INC-" in s.value and "VPN outage" in s.value for s in at.success)
     ticket_store.reset()
