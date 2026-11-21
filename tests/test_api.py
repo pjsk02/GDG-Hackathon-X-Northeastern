@@ -202,5 +202,12 @@ def test_rbac_signup_signin_and_role_enforcement(tmp_path, monkeypatch):
     assert client.get("/outage", headers={"Authorization": f"Bearer {admin_token}"}).status_code == 200
     assert client.get("/auth/me", headers={"Authorization": f"Bearer {admin_token}"}).json()["role"] == "admin"
 
+    # Edge cases: duplicate email, short password, bad email, case-insensitive signin, invalid token
+    assert client.post("/auth/signup", json={"name": "A", "email": "alice@clinic.org", "password": "secret", "role": "user"}).status_code == 400
+    assert client.post("/auth/signup", json={"name": "A", "email": "short@clinic.org", "password": "12", "role": "user"}).status_code == 400
+    assert client.post("/auth/signup", json={"name": "A", "email": "not-an-email", "password": "secret", "role": "user"}).status_code == 400
+    assert client.post("/auth/signin", json={"email": "ALICE@CLINIC.ORG", "password": "secret"}).status_code == 200
+    assert client.get("/auth/me", headers={"Authorization": "Bearer bad.token"}).status_code == 401
+
     api_auth.reset_users()
     ticket_store.reset()

@@ -203,6 +203,7 @@ function setSignupRole(r) {
 async function submitAuth(e) {
   e.preventDefault();
   const errEl = document.getElementById('auth-error');
+  const btn = document.getElementById('auth-submit');
   errEl.classList.add('hidden');
   const email = document.getElementById('auth-email').value.trim();
   const password = document.getElementById('auth-password').value;
@@ -210,30 +211,49 @@ async function submitAuth(e) {
   const url = authMode === 'signup' ? '/auth/signup' : '/auth/signin';
   const payload = authMode === 'signup' ? { name, email, password, role: signupRole } : { email, password };
 
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  });
-  const data = await res.json();
-  if (!res.ok) {
-    errEl.textContent = data.detail || 'Authentication failed';
-    errEl.classList.remove('hidden');
-    return;
-  }
-  saveSession(data.token, data.user);
-  openView(data.user.role === 'admin' ? 'admin' : 'user');
-}
-async function demoSignIn(email, password) {
-  const res = await fetch('/auth/signin', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password })
-  });
-  const data = await res.json();
-  if (res.ok) {
+  btn.disabled = true;
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const detail = Array.isArray(data.detail) ? data.detail.map(d => d.msg).join(', ') : data.detail;
+      errEl.textContent = detail || 'Authentication failed';
+      errEl.classList.remove('hidden');
+      return;
+    }
     saveSession(data.token, data.user);
     openView(data.user.role === 'admin' ? 'admin' : 'user');
+  } catch (err) {
+    errEl.textContent = 'Network error — please try again.';
+    errEl.classList.remove('hidden');
+  } finally {
+    btn.disabled = false;
+  }
+}
+async function demoSignIn(email, password) {
+  const errEl = document.getElementById('auth-error');
+  errEl.classList.add('hidden');
+  try {
+    const res = await fetch('/auth/signin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      errEl.textContent = data.detail || 'Demo sign-in failed';
+      errEl.classList.remove('hidden');
+      return;
+    }
+    saveSession(data.token, data.user);
+    openView(data.user.role === 'admin' ? 'admin' : 'user');
+  } catch (err) {
+    errEl.textContent = 'Network error — please try again.';
+    errEl.classList.remove('hidden');
   }
 }
 function saveSession(token, user) {
