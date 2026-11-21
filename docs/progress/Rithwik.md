@@ -215,3 +215,18 @@ and every text in a batch counts as one request (100 texts accepted in 3.6 s, th
 Google's published free-tier daily cap is 1,000 requests. So the full index (22,869 tickets) is ~3.8 h at best and
 not possible in one day on the free tier. Options: enable billing on the key's project (paid tier; ~2.4M tokens
 at $0.15 per 1M tokens is roughly $0.40 for the whole index), or index a subset.
+
+## Connections after Je's integration (main 84b0975)
+
+Main now has every team's steps; the demo index is Je's EmbeddingGemma (Ollama) index, not a Gemini one.
+- memory/embedder.py: Vertex AI switch (Je's request): with `GOOGLE_GENAI_USE_VERTEXAI=true` the Gemini embedder
+  skips the API key and builds `genai.Client(http_options=...)` so the SDK uses ADC + `GOOGLE_CLOUD_PROJECT` /
+  `GOOGLE_CLOUD_LOCATION`, exactly like agent/llm_router.py. 7 new tests (22 embedder tests).
+- sentinel/incidents.py: without ticket ids, `group_burst` now takes the newest stored ticket per alert subject, so
+  firing the demo burst twice no longer pulls the first burst's tickets into the incident. 2 new tests.
+- eval/crosslingual_check.py: reuses data/sentinel.sqlite when it already holds the provider's vectors (Je's index:
+  `python -m eval.crosslingual_check --providers hash,ollama` on the demo laptop, no re-embedding) and never writes to
+  it. Before, `--build` for gemini wrote into the demo file and would have replaced its EmbeddingGemma rows (same
+  ticket-id keys). 1 new test.
+- docs/requests/Rithwik.md: request to Kaushik to pass `ticket_id=` to the three `tracker.observe` calls.
+- Verified: `pytest -q` 454 passed, 3 runs.

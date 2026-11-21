@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import html
 
 import streamlit as st
@@ -258,6 +259,36 @@ def render_agent_page() -> None:
                     st.rerun()
                 else:
                     st.warning("Paste a ticket body first.")
+
+    with st.expander("🎙️ Voice ticket", expanded=False):
+        st.caption("Record a ticket in English or German. Gemini transcribes it, then it goes through triage.")
+        audio = st.audio_input("Record voice ticket", key="voice_ticket_audio")
+        if audio is not None:
+            data = audio.getvalue()
+            digest = hashlib.sha1(data).hexdigest()
+            if st.session_state.get("voice_ticket_done") != digest:  # reruns return the same clip: triage it once
+                from sentinel.voice_intake import VoiceIntakeError, transcribe_ticket
+
+                try:
+                    with st.spinner("Transcribing voice ticket…"):
+                        vt = transcribe_ticket(data, audio.type or "audio/wav")
+                except VoiceIntakeError as e:
+                    st.warning(str(e))
+                else:
+                    with st.spinner("Triaging voice ticket…"):
+                        tid, res = triage_and_store(
+                            agent, vt.subject, vt.body, source="voice", k=k, provider=provider, fallback=fallback
+                        )
+                        tracker.observe(res, ticket_id=tid)
+                    st.session_state.voice_ticket_done = digest
+                    st.session_state.voice_ticket_last = (tid, vt.language, vt.subject, vt.body)
+                    st.session_state.selected_ticket_id = tid
+                    st.rerun()
+        last = st.session_state.get("voice_ticket_last")
+        if last:
+            tid, lang, vsubj, vbody = last
+            st.success(f"Voice ticket {tid} ({lang.upper()}) triaged: {vsubj}")
+            st.caption(f"Transcript: {vbody}")
 
     tickets = ticket_store.list_tickets()
     if not tickets:

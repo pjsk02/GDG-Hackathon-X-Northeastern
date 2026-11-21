@@ -2,7 +2,8 @@
 
     hash    offline bag-of-words hashing. Zero setup; fine for tests, weak for semantics.
     ollama  any Ollama embedding model (default: embeddinggemma-2:570m). `ollama pull embeddinggemma-2:570m`.
-    gemini  Google AI Studio embeddings (GEMINI_EMBED_MODEL, default gemini-embedding-001). Needs GEMINI_API_KEY.
+    gemini  Gemini embeddings (GEMINI_EMBED_MODEL, default gemini-embedding-001). Needs GEMINI_API_KEY, or Vertex AI
+            with a gcloud login: GOOGLE_GENAI_USE_VERTEXAI=true + GOOGLE_CLOUD_PROJECT + GOOGLE_CLOUD_LOCATION (ADC).
 
 Contract (owner: Rithwik, role C): `get_embedder(settings) -> Embedder`; every embedder has `name` (vectors are
 tagged with it in the store) and `embed(texts, *, is_query=False) -> np.ndarray` of unit-normalized float32 rows.
@@ -10,6 +11,7 @@ tagged with it in the store) and `embed(texts, *, is_query=False) -> np.ndarray`
 
 import hashlib
 import importlib
+import os
 import re
 import time
 from typing import Protocol
@@ -24,6 +26,11 @@ class Embedder(Protocol):
     name: str
 
     def embed(self, texts: list[str], *, is_query: bool = False) -> np.ndarray: ...
+
+
+def _use_vertex() -> bool:
+    """Same switch as agent/llm_router.py: Vertex AI through ADC (`gcloud auth application-default login`)."""
+    return os.environ.get("GOOGLE_GENAI_USE_VERTEXAI", "").strip().lower() == "true"
 
 
 def _normalize(arr: np.ndarray) -> np.ndarray:
@@ -106,8 +113,8 @@ class GeminiEmbedder:
         max_backoff_s: float = 60.0,
         output_dim: int | None = 768,
     ):
-        if not api_key:
-            raise ValueError("EMBED_PROVIDER=gemini needs GEMINI_API_KEY in .env")
+        if not api_key and not _use_vertex():
+            raise ValueError("EMBED_PROVIDER=gemini needs GEMINI_API_KEY in .env (or GOOGLE_GENAI_USE_VERTEXAI=true)")
         self.api_key, self.model, self.batch_size, self.timeout = api_key, model, batch_size, timeout
         # gemini-embedding-001 returns 3072 dims by default; it is trained so a 768 prefix keeps nearly all the
         # quality at a quarter of the index size and search time. None = model default.
@@ -124,9 +131,12 @@ class GeminiEmbedder:
                 from google.genai import types
             except ImportError as e:
                 raise RuntimeError('google-genai not installed: pip install -e ".[gemini]"') from e
-            self._client = genai.Client(
-                api_key=self.api_key, http_options=types.HttpOptions(timeout=int(self.timeout * 1000))  # milliseconds
-            )
+            http_options = types.HttpOptions(timeout=int(self.timeout * 1000))  # milliseconds
+            if _use_vertex():
+                # Vertex AI via ADC: passing api_key would force express mode and ignore the project.
+                self._client = genai.Client(http_options=http_options)
+            else:
+                self._client = genai.Client(api_key=self.api_key, http_options=http_options)
         return self._client
 
     @staticmethod
