@@ -1,0 +1,53 @@
+{
+  "$defs": {
+    "DraftFinding": {
+      "description": "What the model is asked to produce. Never shown to users without grounding.",
+      "properties": {
+        "claim": {
+          "title": "Claim",
+          "type": "string"
+        },
+        "chunk_id": {
+          "description": "id of the context chunk that supports the claim.",
+          "title": "Chunk Id",
+          "type": "string"
+        },
+        "evidence_quote": {
+          "description": "A verbatim, contiguous span copied from that chunk.",
+          "title": "Evidence Quote",
+          "type": "string"
+        },
+        "confidence_score": {
+          "description": "0.0-1.0: how directly the quote supports the claim.",
+          "title": "Confidence Score",
+          "type": "number"
+        }
+      },
+      "required": [
+        "claim",
+        "chunk_id",
+        "evidence_quote",
+        "confidence_score"
+      ],
+      "title": "DraftFinding",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "findings": {
+      "items": {
+        "$ref": "#/$defs/DraftFinding"
+      },
+      "title": "Findings",
+      "type": "array"
+    },
+    "abstain": {
+      "default": false,
+      "description": "True when the context does not answer the question.",
+      "title": "Abstain",
+      "type": "boolean"
+    }
+  },
+  "title": "DraftAnswer",
+  "type": "object"
+}

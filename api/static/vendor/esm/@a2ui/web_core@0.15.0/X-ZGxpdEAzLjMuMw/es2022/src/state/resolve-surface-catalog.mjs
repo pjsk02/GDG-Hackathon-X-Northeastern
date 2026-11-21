@@ -1,0 +1,3 @@
+/* esm.sh - @a2ui/web_core@0.15.0/src/state/resolve-surface-catalog */
+import{A2uiCatalogError as n}from"/vendor/esm/@a2ui/web_core@0.15.0/X-ZGxpdEAzLjMuMw/es2022/errors.mjs";function r(a,o,e){if(o!==void 0){let t=a.availableCatalogs?.get(o);if(!t)throw new n(`Catalog not found: ${o}`);return t}if(!a.defaultCatalog)throw new n(`${e} names no catalogId and surface '${a.id}' has no default catalogId.`);return a.defaultCatalog}export{r as resolveSurfaceCatalog};
+//# sourceMappingURL=resolve-surface-catalog.mjs.map

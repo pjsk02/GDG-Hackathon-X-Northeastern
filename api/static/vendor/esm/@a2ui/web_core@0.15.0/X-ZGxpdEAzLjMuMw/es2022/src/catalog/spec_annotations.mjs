@@ -1,0 +1,3 @@
+/* esm.sh - @a2ui/web_core@0.15.0/src/catalog/spec_annotations */
+import{z as r}from"/vendor/esm/zod@_3.25.76__784fb81524.js";var o=new WeakMap;function c(e,n,p=e.description){let t=r.ZodType.prototype.describe.call(e,p);return o.set(t,n),t.describe=i=>c(t,o.get(t)??n,i),t}function f(e,n){let p=r.ZodType.prototype.describe.call(e,e.description);return o.set(p,{...o.get(e),...n}),p}function u(e,n,p={}){let t=c(n,{...o.get(n),...p,defName:e});return o.set(t,{...o.get(t),defName:e,defModel:t}),t}function s(e){return typeof e=="object"&&e!==null?o.get(e):void 0}export{s as getSpecAnnotation,f as spec,u as specDef};
+//# sourceMappingURL=spec_annotations.mjs.map

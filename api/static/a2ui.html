@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Grounded Agent · A2UI</title>
+  <style>
+    :root {
+      --bg: #f8fafc; --fg: #0f172a; --muted: #64748b; --line: #e2e8f0; --field: #ffffff;
+      --accent: #1a73e8; --on-accent: #ffffff;
+      /* A2UI Basic Catalog theme tokens */
+      --a2ui-color-primary: var(--accent);
+      --a2ui-color-on-primary: var(--on-accent);
+      --a2ui-color-background: var(--bg);
+      --a2ui-color-surface: var(--field);
+      --a2ui-color-on-background: var(--fg);
+      color-scheme: light dark;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0b1120; --fg: #e2e8f0; --muted: #94a3b8; --line: #1e293b; --field: #111827;
+        --accent: #8ab4f8; --on-accent: #0b1120;
+      }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--fg); }
+    main { max-width: 760px; margin: 0 auto; padding: 24px 16px 64px; }
+    h1 { font-size: 1.35rem; margin: 0 0 4px; }
+    .sub { color: var(--muted); font-size: .9rem; margin: 0 0 20px; }
+    form { display: flex; gap: 8px; flex-wrap: wrap; }
+    input, select, button {
+      font: inherit; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line);
+      background: var(--field); color: var(--fg);
+    }
+    input { flex: 1 1 260px; min-width: 0; }
+    button { background: var(--accent); color: var(--on-accent); border: 0; cursor: pointer; font-weight: 600; }
+    button:disabled { opacity: .6; cursor: progress; }
+    #status { color: var(--muted); font-size: .85rem; min-height: 1.4em; margin: 10px 0 14px; }
+    #surfaces { display: flex; flex-direction: column; gap: 16px; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Grounded Agent</h1>
+  <p class="sub">Answers are drawn from A2UI v1.0 messages built from findings that passed grounding.</p>
+  <form id="ask">
+    <input id="q" placeholder="Ask about the indexed data, e.g. How do I report a pothole?" autocomplete="off" required>
+    <select id="provider" aria-label="Provider">
+      <option value="">Default provider</option>
+      <option value="extractive">Extractive (offline)</option>
+      <option value="ollama">Gemma 4 (local)</option>
+      <option value="gemini">Gemini</option>
+    </select>
+    <button id="go" type="submit">Ask</button>
+  </form>
+  <div id="status" role="status"></div>
+  <div id="surfaces"></div>
+</main>
+
+<script type="module">
+  // Served locally from /vendor so the page works with no internet. These are mirrors of
+  // @a2ui/lit + @a2ui/web_core 0.15.0 and @a2ui/markdown-it 0.2.2 from esm.sh (lit 3.3.3), sharing
+  // one copy of web_core. Re-create with: python tools/vendor_a2ui.py
+  import "/vendor/esm/lit.js";
+  import {
+    MessageProcessor, basicCatalog, injectBasicCatalogStyles, setMarkdownRenderer,
+  } from "/vendor/esm/web_core_v1_0.js";
+  // Official A2UI Markdown renderer (markdown-it + DOMPurify). The server escapes model text
+  // and fences source chunks, so this only formats; it never interprets user content as HTML.
+  import { renderMarkdown } from "/vendor/esm/markdown_it.js";
+
+  const ENDPOINT = "/a2ui/agent";
+  const $ = (id) => document.getElementById(id);
+  const statusEl = $("status"), surfacesEl = $("surfaces"), goBtn = $("go");
+  const mounted = new Map(); // surfaceId -> <a2ui-surface>
+
+  injectBasicCatalogStyles();
+  setMarkdownRenderer(renderMarkdown);
+  const processor = new MessageProcessor([basicCatalog], (action) => send({ message: { version: "1.0", action } }));
+
+  // Newest surface on top; drop elements for deleted surfaces.
+  function sync() {
+    const live = processor.getSurfaces();
+    for (const [id, el] of mounted) if (!live.has(id)) { el.remove(); mounted.delete(id); }
+    for (const [id, surface] of live) {
+      if (mounted.has(id)) continue;
+      const el = document.createElement("a2ui-surface");
+      el.surface = surface;
+      surfacesEl.prepend(el);
+      mounted.set(id, el);
+    }
+  }
+  processor.onSurfaceCreated(sync);
+  processor.onSurfaceDeleted(sync);
+
+  async function send(body) {
+    goBtn.disabled = true;
+    statusEl.textContent = body.prompt ? "Retrieving and verifying…" : `Running ${body.message.action.name}…`;
+    const t0 = performance.now();
+    try {
+      const r = await fetch(ENDPOINT, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      });
+      if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
+      await processor.processMessagesAsync(await r.json());
+      statusEl.textContent = `Done in ${((performance.now() - t0) / 1000).toFixed(1)} s`;
+    } catch (e) {
+      statusEl.textContent = `Request failed: ${e.message}`;
+    } finally {
+      goBtn.disabled = false;
+    }
+  }
+
+  $("ask").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const prompt = $("q").value.trim();
+    if (prompt) send({ prompt, provider: $("provider").value || null });
+  });
+</script>
+</body>
+</html>

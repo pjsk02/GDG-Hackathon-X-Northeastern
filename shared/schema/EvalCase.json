@@ -1,0 +1,46 @@
+{
+  "properties": {
+    "id": {
+      "title": "Id",
+      "type": "string"
+    },
+    "question": {
+      "title": "Question",
+      "type": "string"
+    },
+    "expected_sources": {
+      "description": "Substrings; a finding counts as correct if its source contains one.",
+      "items": {
+        "type": "string"
+      },
+      "title": "Expected Sources",
+      "type": "array"
+    },
+    "expected_quote_contains": {
+      "description": "Case-insensitive substrings; the answer is correct only if a verified quote contains one.",
+      "items": {
+        "type": "string"
+      },
+      "title": "Expected Quote Contains",
+      "type": "array"
+    },
+    "should_abstain": {
+      "default": false,
+      "title": "Should Abstain",
+      "type": "boolean"
+    },
+    "tags": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Tags",
+      "type": "array"
+    }
+  },
+  "required": [
+    "id",
+    "question"
+  ],
+  "title": "EvalCase",
+  "type": "object"
+}

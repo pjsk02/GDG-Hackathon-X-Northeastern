@@ -1,0 +1,42 @@
+{
+  "properties": {
+    "question": {
+      "title": "Question",
+      "type": "string"
+    },
+    "k": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "K"
+    },
+    "provider": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Provider"
+    },
+    "fallback": {
+      "default": true,
+      "title": "Fallback",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "question"
+  ],
+  "title": "AskRequest",
+  "type": "object"
+}

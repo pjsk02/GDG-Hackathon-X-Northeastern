@@ -1,0 +1,48 @@
+{
+  "properties": {
+    "id": {
+      "description": "Stable id: hash of source + locator.",
+      "title": "Id",
+      "type": "string"
+    },
+    "source": {
+      "description": "File path (posix, relative to ingest root) or URL.",
+      "title": "Source",
+      "type": "string"
+    },
+    "kind": {
+      "enum": [
+        "code",
+        "doc",
+        "media"
+      ],
+      "title": "Kind",
+      "type": "string"
+    },
+    "text": {
+      "title": "Text",
+      "type": "string"
+    },
+    "locator": {
+      "description": "Where in the source: \"L10-L42\", \"p3\", or \"00:01:05-00:01:35\".",
+      "title": "Locator",
+      "type": "string"
+    },
+    "metadata": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Metadata",
+      "type": "object"
+    }
+  },
+  "required": [
+    "id",
+    "source",
+    "kind",
+    "text",
+    "locator"
+  ],
+  "title": "Chunk",
+  "type": "object"
+}

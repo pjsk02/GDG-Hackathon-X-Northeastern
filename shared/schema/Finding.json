@@ -1,0 +1,41 @@
+{
+  "description": "A claim that passed grounding. This is the user-facing unit.",
+  "properties": {
+    "claim": {
+      "title": "Claim",
+      "type": "string"
+    },
+    "evidence_source": {
+      "title": "Evidence Source",
+      "type": "string"
+    },
+    "line_or_timestamp": {
+      "title": "Line Or Timestamp",
+      "type": "string"
+    },
+    "evidence_quote": {
+      "title": "Evidence Quote",
+      "type": "string"
+    },
+    "confidence_score": {
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "title": "Confidence Score",
+      "type": "number"
+    },
+    "chunk_id": {
+      "title": "Chunk Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "claim",
+    "evidence_source",
+    "line_or_timestamp",
+    "evidence_quote",
+    "confidence_score",
+    "chunk_id"
+  ],
+  "title": "Finding",
+  "type": "object"
+}

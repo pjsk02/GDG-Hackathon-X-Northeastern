@@ -1,0 +1,3 @@
+/* esm.sh - @a2ui/web_core@0.15.0/src/common/sanitize_media_url */
+function s(i){if(typeof i!="string")return;let t=i.trim();if(!t||t.startsWith("//")||t.startsWith("\\\\"))return;let r="https://example.invalid/",e;try{e=new URL(t,r)}catch{return}let n=(e.protocol==="http:"||e.protocol==="https:")&&(/^https?:\/\//i.test(t)||e.origin==="https://example.invalid"&&!/^https?:/i.test(t.replace(/[\t\n\r]/g,"")));if(!(e.protocol!=="data:"&&!n))return t}export{s as sanitizeMediaUrl};
+//# sourceMappingURL=sanitize_media_url.mjs.map

@@ -1,0 +1,3 @@
+/* esm.sh - @a2ui/web_core@0.15.0/src/common/settle_deep */
+function o(t){return typeof t=="object"&&t!==null&&typeof t.then=="function"}function f(t){if(Array.isArray(t)||typeof t!="object"||t===null)return!1;let r=Object.getPrototypeOf(t);return r===Object.prototype||r===null}function i(t){if(o(t))return Promise.resolve(t).then(i);if(Array.isArray(t)){let r=t.map(i);return r.some(o)?Promise.all(r):t}if(f(t)){let r=Object.entries(t).map(([e,n])=>[e,i(n)]);return r.some(([,e])=>o(e))?Promise.all(r.map(([,e])=>e)).then(e=>Object.fromEntries(r.map(([n],s)=>[n,e[s]]))):t}return t}export{f as isPlainObject,o as isThenable,i as settleDeep};
+//# sourceMappingURL=settle_deep.mjs.map

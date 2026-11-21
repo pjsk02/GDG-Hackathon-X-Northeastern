@@ -1,0 +1,3 @@
+/* esm.sh - @a2ui/web_core@0.15.0/catalog */
+export*from"/vendor/esm/@a2ui/web_core@0.15.0/X-ZGxpdEAzLjMuMw/es2022/src/catalog/types.mjs";export*from"/vendor/esm/@a2ui/web_core@0.15.0/X-ZGxpdEAzLjMuMw/es2022/src/catalog/function_invoker.mjs";import{JsonComponentApi as n,JsonFunctionApi as t}from"/vendor/esm/@a2ui/web_core@0.15.0/X-ZGxpdEAzLjMuMw/es2022/src/catalog/json_entries.mjs";import{spec as m,specDef as s}from"/vendor/esm/@a2ui/web_core@0.15.0/X-ZGxpdEAzLjMuMw/es2022/src/catalog/spec_annotations.mjs";export{n as JsonComponentApi,t as JsonFunctionApi,m as spec,s as specDef};
+//# sourceMappingURL=catalog.mjs.map

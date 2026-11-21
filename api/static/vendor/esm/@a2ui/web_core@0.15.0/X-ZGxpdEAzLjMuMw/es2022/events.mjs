@@ -1,0 +1,3 @@
+/* esm.sh - @a2ui/web_core@0.15.0/events */
+var t=class{constructor(){this.listeners=new Set}subscribe(s){return this.listeners.add(s),{unsubscribe:()=>this.listeners.delete(s)}}async emit(s){for(let r of this.listeners)try{let e=r(s);e&&typeof e.then=="function"&&await e}catch(e){console.error("EventEmitter error:",e)}}dispose(){this.listeners.clear()}};export{t as EventEmitter};
+//# sourceMappingURL=events.mjs.map

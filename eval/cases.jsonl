@@ -1,0 +1,12 @@
+{"id": "doc-pothole-report", "question": "How can residents report a pothole?", "expected_sources": ["street_services.md"], "tags": ["doc"]}
+{"id": "doc-pothole-sla", "question": "How quickly are reported potholes repaired?", "expected_sources": ["street_services.md"], "tags": ["doc"]}
+{"id": "doc-snow-tow", "question": "Can vehicles be towed during a snow emergency?", "expected_sources": ["street_services.md"], "tags": ["doc"]}
+{"id": "doc-sidewalk", "question": "When must sidewalks be cleared after snowfall?", "expected_sources": ["street_services.md"], "tags": ["doc"]}
+{"id": "doc-streetlight", "question": "How long do street light outage repairs take?", "expected_sources": ["street_services.md"], "tags": ["doc"]}
+{"id": "code-occupancy-limit", "question": "What is the maximum number of days for a street occupancy permit?", "expected_sources": ["permits.py"], "tags": ["code"]}
+{"id": "code-cafe-fee", "question": "What is the fee for a sidewalk cafe permit?", "expected_sources": ["permits.py"], "tags": ["code"]}
+{"id": "media-library-sunday", "question": "What did the committee vote on regarding library hours on Sundays?", "expected_sources": ["council_meeting.srt"], "tags": ["media"]}
+{"id": "media-bike-lane", "question": "When will the Main Street bike lane pilot be reviewed?", "expected_sources": ["council_meeting.srt"], "tags": ["media"]}
+{"id": "abstain-weather", "question": "What will tomorrow's weather forecast be in Tokyo?", "should_abstain": true, "tags": ["abstain"]}
+{"id": "abstain-stock", "question": "Which cryptocurrency exchange has the lowest trading fees?", "should_abstain": true, "tags": ["abstain"]}
+{"id": "abstain-recipe", "question": "Give me a recipe for chocolate chip cookies.", "should_abstain": true, "tags": ["abstain"]}

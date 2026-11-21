@@ -1,0 +1,3 @@
+/* esm.sh - @a2ui/web_core@0.15.0/src/common/uax31 */
+import{A2uiCatalogError as i}from"/vendor/esm/@a2ui/web_core@0.15.0/X-ZGxpdEAzLjMuMw/es2022/errors.mjs";var s=new RegExp("^[\\p{XID_Start}_][\\p{XID_Continue}]*$","u");function n(t,e=!1){if(!t)return!1;let r=e&&t.startsWith("@")?t.slice(1):t;return s.test(r)}function a(t,e,r=!1){if(!n(t,r))throw new i(`Invalid UAX #31 ${e}`)}export{a as assertUax31Identifier,n as isValidUax31Identifier};
+//# sourceMappingURL=uax31.mjs.map

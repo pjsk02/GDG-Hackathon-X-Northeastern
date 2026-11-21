@@ -1,0 +1,37 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "grounded-agent"
+version = "0.1.0"
+description = "Grounded retrieval agent: local memory -> LLM -> citation-verified findings (FastAPI, A2UI, Streamlit, eval)"
+requires-python = ">=3.12,<3.13"
+# Lower bounds = versions this was last verified with (2026-11-21).
+dependencies = [
+    "fastapi>=0.163",
+    "uvicorn>=0.54",
+    "requests>=2.34",
+    "pydantic>=2.14",
+    "pydantic-settings>=2.16",
+    "numpy>=2.5",
+]
+
+[project.optional-dependencies]
+gemini = ["google-genai>=3.4"]
+ui = ["streamlit>=1.67"]
+plots = ["matplotlib>=3.11"]
+docs = ["pypdf>=7.1"]
+media = ["faster-whisper"]
+dev = [
+    "pytest>=9.2",
+    "jsonschema>=4.26",  # tests/test_a2ui.py validates A2UI output against the official v1.0 schemas
+    "referencing>=0.37",
+]
+all = ["grounded-agent[gemini,ui,plots,docs,dev]"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["agent", "api", "eval", "memory", "shared"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

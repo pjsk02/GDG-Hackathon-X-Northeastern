@@ -1,0 +1,299 @@
+{
+  "$defs": {
+    "Chunk": {
+      "properties": {
+        "id": {
+          "description": "Stable id: hash of source + locator.",
+          "title": "Id",
+          "type": "string"
+        },
+        "source": {
+          "description": "File path (posix, relative to ingest root) or URL.",
+          "title": "Source",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "code",
+            "doc",
+            "media"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "locator": {
+          "description": "Where in the source: \"L10-L42\", \"p3\", or \"00:01:05-00:01:35\".",
+          "title": "Locator",
+          "type": "string"
+        },
+        "metadata": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Metadata",
+          "type": "object"
+        }
+      },
+      "required": [
+        "id",
+        "source",
+        "kind",
+        "text",
+        "locator"
+      ],
+      "title": "Chunk",
+      "type": "object"
+    },
+    "DraftFinding": {
+      "description": "What the model is asked to produce. Never shown to users without grounding.",
+      "properties": {
+        "claim": {
+          "title": "Claim",
+          "type": "string"
+        },
+        "chunk_id": {
+          "description": "id of the context chunk that supports the claim.",
+          "title": "Chunk Id",
+          "type": "string"
+        },
+        "evidence_quote": {
+          "description": "A verbatim, contiguous span copied from that chunk.",
+          "title": "Evidence Quote",
+          "type": "string"
+        },
+        "confidence_score": {
+          "description": "0.0-1.0: how directly the quote supports the claim.",
+          "title": "Confidence Score",
+          "type": "number"
+        }
+      },
+      "required": [
+        "claim",
+        "chunk_id",
+        "evidence_quote",
+        "confidence_score"
+      ],
+      "title": "DraftFinding",
+      "type": "object"
+    },
+    "Finding": {
+      "description": "A claim that passed grounding. This is the user-facing unit.",
+      "properties": {
+        "claim": {
+          "title": "Claim",
+          "type": "string"
+        },
+        "evidence_source": {
+          "title": "Evidence Source",
+          "type": "string"
+        },
+        "line_or_timestamp": {
+          "title": "Line Or Timestamp",
+          "type": "string"
+        },
+        "evidence_quote": {
+          "title": "Evidence Quote",
+          "type": "string"
+        },
+        "confidence_score": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Confidence Score",
+          "type": "number"
+        },
+        "chunk_id": {
+          "title": "Chunk Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "claim",
+        "evidence_source",
+        "line_or_timestamp",
+        "evidence_quote",
+        "confidence_score",
+        "chunk_id"
+      ],
+      "title": "Finding",
+      "type": "object"
+    },
+    "ProviderAttempt": {
+      "description": "One step of the fallback chain.",
+      "properties": {
+        "provider": {
+          "title": "Provider",
+          "type": "string"
+        },
+        "model": {
+          "title": "Model",
+          "type": "string"
+        },
+        "ok": {
+          "title": "Ok",
+          "type": "boolean"
+        },
+        "skipped": {
+          "default": false,
+          "description": "Not called: provider is cooling down after a recent failure.",
+          "title": "Skipped",
+          "type": "boolean"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Error"
+        },
+        "latency_ms": {
+          "default": 0.0,
+          "title": "Latency Ms",
+          "type": "number"
+        }
+      },
+      "required": [
+        "provider",
+        "model",
+        "ok"
+      ],
+      "title": "ProviderAttempt",
+      "type": "object"
+    },
+    "Rejection": {
+      "properties": {
+        "finding": {
+          "$ref": "#/$defs/DraftFinding"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "kind": {
+          "default": "quote_not_found",
+          "enum": [
+            "unknown_chunk",
+            "quote_too_short",
+            "quote_not_found",
+            "claim_mismatch",
+            "bad_confidence",
+            "low_confidence"
+          ],
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "finding",
+        "reason"
+      ],
+      "title": "Rejection",
+      "type": "object"
+    },
+    "RetrievedChunk": {
+      "properties": {
+        "chunk": {
+          "$ref": "#/$defs/Chunk"
+        },
+        "score": {
+          "title": "Score",
+          "type": "number"
+        }
+      },
+      "required": [
+        "chunk",
+        "score"
+      ],
+      "title": "RetrievedChunk",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "question": {
+      "title": "Question",
+      "type": "string"
+    },
+    "findings": {
+      "items": {
+        "$ref": "#/$defs/Finding"
+      },
+      "title": "Findings",
+      "type": "array"
+    },
+    "rejected": {
+      "items": {
+        "$ref": "#/$defs/Rejection"
+      },
+      "title": "Rejected",
+      "type": "array"
+    },
+    "retrieved": {
+      "items": {
+        "$ref": "#/$defs/RetrievedChunk"
+      },
+      "title": "Retrieved",
+      "type": "array"
+    },
+    "abstained": {
+      "title": "Abstained",
+      "type": "boolean"
+    },
+    "provider": {
+      "description": "The provider that produced this answer (after any fallback).",
+      "title": "Provider",
+      "type": "string"
+    },
+    "model": {
+      "title": "Model",
+      "type": "string"
+    },
+    "latency_ms": {
+      "title": "Latency Ms",
+      "type": "number"
+    },
+    "fell_back": {
+      "default": false,
+      "description": "True if the requested provider failed and another answered.",
+      "title": "Fell Back",
+      "type": "boolean"
+    },
+    "attempts": {
+      "items": {
+        "$ref": "#/$defs/ProviderAttempt"
+      },
+      "title": "Attempts",
+      "type": "array"
+    },
+    "error": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Set only when every provider in the chain failed.",
+      "title": "Error"
+    }
+  },
+  "required": [
+    "question",
+    "findings",
+    "abstained",
+    "provider",
+    "model",
+    "latency_ms"
+  ],
+  "title": "AgentAnswer",
+  "type": "object"
+}

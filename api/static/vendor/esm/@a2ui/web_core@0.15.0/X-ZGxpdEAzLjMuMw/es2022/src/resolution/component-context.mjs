@@ -1,0 +1,3 @@
+/* esm.sh - @a2ui/web_core@0.15.0/src/resolution/component-context */
+import{DataContext as m}from"/vendor/esm/@a2ui/web_core@0.15.0/X-ZGxpdEAzLjMuMw/es2022/src/resolution/data-context.mjs";import{A2uiStateError as p}from"/vendor/esm/@a2ui/web_core@0.15.0/X-ZGxpdEAzLjMuMw/es2022/errors.mjs";var n=class{constructor(t,o,e="/",s,h){let i=t.componentsModel.get(o);if(!i)throw new p(`Component not found: ${o}`);this.componentModel=i,this.surfaceComponents=t.componentsModel,this.theme=t.theme,this.dataContext=new m(t,e,h,s),this._actionDispatcher=(c,r)=>t.dispatchAction(c,this.componentModel.id,r)}dispatchAction(t,o){return this._actionDispatcher(t,o)}};export{n as ComponentContext};
+//# sourceMappingURL=component-context.mjs.map

@@ -1,0 +1,19 @@
+1
+00:00:01,000 --> 00:00:06,500
+Good evening, this sample transcript is synthetic placeholder content.
+
+2
+00:00:07,000 --> 00:00:14,000
+The committee voted to extend library hours on Sundays starting in March.
+
+3
+00:00:15,000 --> 00:00:22,000
+Branch libraries will stay open until eight PM on weekdays.
+
+4
+00:00:40,000 --> 00:00:48,000
+Next, the bike lane pilot on Main Street will be reviewed after six months.
+
+5
+00:00:49,000 --> 00:00:57,000
+Public comment on the bike lane pilot closes at the end of the month.

@@ -1,0 +1,3 @@
+/* esm.sh - @a2ui/web_core@0.15.0/src/v0_9/basic_catalog/functions/safe_regex */
+import{isSafePattern as f}from"/vendor/esm/redos-detector@_6.1.4__784fb81524.js";function u(e,n={}){if(e==null||typeof e!="string"||e.length===0)return!0;let r=n.maxPatternLength??256;if(e.length>r)return!1;try{return new RegExp(e),f(e).safe&&f(`^(?:${e})$`).safe}catch{return!1}}export{u as isSafeRegex};
+//# sourceMappingURL=safe_regex.mjs.map

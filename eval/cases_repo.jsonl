@@ -1,0 +1,31 @@
+// Stand-in benchmark until the kickoff dataset exists: questions about THIS repo's own code and docs.
+// Corpus: `make index-bench` (~100 chunks in data/bench.sqlite), so retrieval is tested (top_k << corpus).
+// Run: `make eval-bench`. Every answer below was checked against the source.
+{"id": "cfg-gemini-timeout", "question": "How many seconds before a hung Gemini call gives up?", "expected_sources": ["shared/settings.py"], "expected_quote_contains": ["30"], "tags": ["config"]}
+{"id": "cfg-cooldown", "question": "After a provider fails, for how many seconds is it skipped?", "expected_sources": ["shared/settings.py"], "expected_quote_contains": ["60"], "tags": ["config"]}
+{"id": "cfg-min-confidence", "question": "What is the default minimum confidence a finding needs to be accepted?", "expected_sources": ["shared/settings.py"], "expected_quote_contains": ["0.5"], "tags": ["config"]}
+{"id": "cfg-ollama-model", "question": "Which Ollama model is used for generation by default?", "expected_sources": ["shared/settings.py"], "expected_quote_contains": ["gemma4:e4b"], "tags": ["config"]}
+{"id": "cfg-embed-model", "question": "Which embedding model is the default for the Ollama embedder?", "expected_sources": ["shared/settings.py", "memory/embedder.py"], "expected_quote_contains": ["embeddinggemma-2:570m"], "tags": ["config"]}
+{"id": "cfg-keep-alive", "question": "How long does Ollama keep models loaded after the last request by default?", "expected_sources": ["shared/settings.py"], "expected_quote_contains": ["30m"], "tags": ["config"]}
+{"id": "ground-min-quote", "question": "What is the minimum number of characters an evidence quote must have?", "expected_sources": ["agent/grounding.py"], "expected_quote_contains": ["MIN_QUOTE_CHARS = 8"], "tags": ["grounding"]}
+{"id": "chunk-id-hash", "question": "Which hash function is used to build chunk ids?", "expected_sources": ["memory/chunking.py"], "expected_quote_contains": ["sha1"], "tags": ["memory"]}
+{"id": "media-window", "question": "How many seconds of transcript go into one media chunk?", "expected_sources": ["memory/ingest_media.py", "memory/chunking.py"], "expected_quote_contains": ["30.0"], "tags": ["memory"]}
+{"id": "whisper-size", "question": "Which faster-whisper model size is used to transcribe audio?", "expected_sources": ["memory/ingest_media.py"], "expected_quote_contains": ["base"], "tags": ["memory"]}
+{"id": "docs-chunk-size", "question": "What is the maximum number of characters per document chunk?", "expected_sources": ["memory/ingest_docs.py"], "expected_quote_contains": ["1200"], "tags": ["memory"]}
+{"id": "csv-rows", "question": "How many rows of a CSV file go into one chunk?", "expected_sources": ["memory/ingest_docs.py"], "expected_quote_contains": ["40"], "tags": ["memory"]}
+{"id": "hash-dim", "question": "What vector dimension does the offline hash embedder use?", "expected_sources": ["memory/embedder.py"], "expected_quote_contains": ["1024"], "tags": ["memory"]}
+{"id": "embed-batch", "question": "How many texts are sent to Ollama per embedding request?", "expected_sources": ["memory/embedder.py"], "expected_quote_contains": ["32"], "tags": ["memory"]}
+{"id": "query-prefix", "question": "What prefix is added to search queries for EmbeddingGemma?", "expected_sources": ["memory/embedder.py"], "expected_quote_contains": ["task: search result"], "tags": ["memory"]}
+{"id": "store-table", "question": "What is the name of the SQLite table that stores chunks and vectors?", "expected_sources": ["memory/store.py"], "expected_quote_contains": ["chunks"], "tags": ["memory"]}
+{"id": "postgis-image", "question": "Which Docker image runs the Postgres database?", "expected_sources": ["docker-compose.yml"], "expected_quote_contains": ["postgis/postgis:16-3.4"], "tags": ["infra"]}
+{"id": "python-version", "question": "Which Python versions does the project require?", "expected_sources": ["pyproject.toml"], "expected_quote_contains": [">=3.12"], "tags": ["infra"]}
+{"id": "pg-schemas", "question": "Which Postgres schema is the landing zone for raw CKAN harvests?", "expected_sources": ["db/001_schemas.sql"], "expected_quote_contains": ["raw"], "tags": ["infra"]}
+{"id": "migrations-table", "question": "Which table records the database migrations that have been applied?", "expected_sources": ["db/migrate.sh"], "expected_quote_contains": ["schema_migrations"], "tags": ["infra"]}
+{"id": "a2ui-version", "question": "Which A2UI protocol version do the agent's UI messages declare?", "expected_sources": ["api/a2ui.py"], "expected_quote_contains": ["1.0"], "tags": ["api"]}
+{"id": "warmup-attempts", "question": "How many times does the Ollama warm-up try before giving up?", "expected_sources": ["agent/llm_router.py"], "expected_quote_contains": ["attempts: int = 3"], "tags": ["agent"]}
+{"id": "pothole-sla", "question": "How quickly are reported potholes repaired?", "expected_sources": ["street_services.md"], "expected_quote_contains": ["two business days"], "tags": ["sample"]}
+{"id": "sidewalk-snow", "question": "How soon must sidewalks be cleared after snowfall ends?", "expected_sources": ["street_services.md"], "expected_quote_contains": ["three hours"], "tags": ["sample"]}
+{"id": "bike-lane", "question": "When will the Main Street bike lane pilot be reviewed?", "expected_sources": ["council_meeting.srt"], "expected_quote_contains": ["six months"], "tags": ["sample"]}
+{"id": "abstain-capital", "question": "What is the capital of Australia?", "should_abstain": true, "tags": ["abstain"]}
+{"id": "abstain-worldcup", "question": "Who won the 2022 football World Cup?", "should_abstain": true, "tags": ["abstain"]}
+{"id": "abstain-sourdough", "question": "How long should sourdough bread proof overnight?", "should_abstain": true, "tags": ["abstain"]}
