@@ -15,6 +15,7 @@ Added for F2 and used by sentinel/calibration.py, explain.py and feedback.py:
     TriageModel.fit(train_df)                  linear heads on the TRAIN slice
     TriageModel.calibrate(val_df)              per-head calibration on the VALIDATION slice
     TriageModel.predict_proba_heads(texts, calibrated=True) -> {head: (proba, classes)}
+    TriageModel.features(texts)                sparse tf-idf rows (last single text cached for explain)
     TriageModel.heads[head]                    the raw LogisticRegression (coefficients for explain)
 
 Calibration (F2). Candidates per head: temperature scaling (softmax(logits / T), one scalar, never
@@ -150,6 +151,7 @@ class TriageModel:
     # -- training ---------------------------------------------------------
 
     def fit(self, kb_train_df: pd.DataFrame, verbose: bool = True) -> "TriageModel":
+        self._last_features = None  # the vectorizer is refit in place, so cached rows would be stale
         texts = [dataset.ticket_text(r) for r in kb_train_df.to_dict("records")]
         t0 = time.perf_counter()
         X = self.vectorizer.fit_transform(texts)
@@ -219,9 +221,21 @@ class TriageModel:
         self.calibrated_on = int(len(val_df))
         return self
 
+    def features(self, texts: list[str]) -> Any:
+        """Sparse [word | char] tf-idf rows. The last single text is cached, so explain() right after
+        predict() on the same ticket (what the pipeline does) skips the ~1-2 ms character pass."""
+        if len(texts) != 1:
+            return self.vectorizer.transform(texts)
+        last = getattr(self, "_last_features", None)
+        if last is not None and last[0] == texts[0] and last[1] is self.vectorizer:
+            return last[2]
+        X = self.vectorizer.transform(texts)
+        self._last_features = (texts[0], self.vectorizer, X)  # one tuple assignment: safe across threads
+        return X
+
     def predict_proba_heads(self, texts: list[str], calibrated: bool = True) -> dict[str, tuple[np.ndarray, np.ndarray]]:
         """{head: (probabilities [n, k], classes [k])}; the raw head output when `calibrated=False`."""
-        X = self.vectorizer.transform(texts)
+        X = self.features(texts)
         out: dict[str, tuple[np.ndarray, np.ndarray]] = {}
         for head in HEADS:
             clf = self.heads[head]

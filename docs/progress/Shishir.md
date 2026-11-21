@@ -126,3 +126,70 @@ high, `tier=PAGE_ONCALL`, grounded, triage 8.5 ms.
 - **Step 3 (explain):** raw linear heads are `model.heads[head]` (LogisticRegression). Temperature does not
   change coefficient ranking.
 - Rebuild the model with `make sentinel-train`, about 3.5 min.
+
+## Step 3 - Why-this-label (N3) (2026-11-21)
+
+**Built**
+- `sentinel/explain.py`: `explain(model, text, top_n=3) -> dict[str, list[str]]`, with the contract unchanged.
+  For each head it takes the predicted class c (the calibrated argmax, so it matches the label on screen) and
+  ranks this ticket's word 1-2-gram features by `tfidf_j x (w_cj - mean_k w_kj)`. That is the feature's push on
+  c's logit relative to the other classes; the coefficients already sum to zero across classes. Character
+  n-grams are skipped.
+  - Only positive evidence is kept.
+  - Stopword-only and digit-only n-grams are dropped. Edge stopwords are trimmed ("the firewall" -> "firewall").
+  - A phrase that shares a content word with a stronger one is skipped.
+  - A bigram that only exists across punctuation ("service? Thank") is skipped. Hyphenated words are kept
+    ("Projektmanagement-SaaS").
+  - Phrases are returned with the ticket's own casing ("VPN", "Rechnung").
+- The coefficient arrays are cached per model and rebuilt automatically when a head object changes, for example
+  after Step 4 promotes a challenger.
+- `sentinel/triage.py`: new `TriageModel.features(texts)` that caches the last single-text tf-idf pass, which
+  `predict_proba_heads` now uses. When `explain()` runs right after `predict()` on the same ticket, as in the
+  pipeline, it reuses those rows instead of redoing the character n-gram pass.
+- `tests/test_explain.py`: 20 offline tests covering correct words per head, `top_n`, no repeated words,
+  casing, stopwords and digits, positive-only evidence, punctuation, odd input (empty, emoji, 5,000 chars,
+  German-only), an unusable model giving `{}`, an uncalibrated model, cache invalidation, feature cache and speed.
+
+**Never raises:** `None`, a test double or any object without linear heads gives `{}`. Empty, emoji-only or
+digit-only text gives `{"type": [], "queue": [], "priority": []}`. Any other internal error gives empty lists.
+
+**5 real tickets** (validation slice; the holdout was not used):
+
+| # | lang | ticket (subject) | predicted type / queue / priority | why: type | why: queue | why: priority |
+|---|---|---|---|---|---|---|
+| 1 | en | Incident of Data Leakage in Medical Records Encrypted w | Incident / Technical Support / medium | Incident, involving, secure settings | Docker, exist, involving medical | secure settings, Leakage, involving medical |
+| 2 | de | Sicherung medizinischer Daten-Systeme | Request / Billing and Payments / medium | Sicherung, medizinischer Daten, Details | Hospital, Daten, relevanter Vorschriften | Praktiken, Möchten, besten |
+| 3 | en | Customer Support Inquiry | Request / Returns and Exchanges / low | provide, details, digital strategies | services, growth, business | assist, business, appreciate information |
+| 4 | de | Unterstützung für Projektmanagement SaaS | Request / Billing and Payments / medium | Könnten, Details, SaaS | Details, Gebühren, bereitstellen | eventuelle, Details, Projektmanagement |
+| 5 | en | Details on Project Management SaaS Pricing | Request / Billing and Payments / medium | Details, possible, SaaS | Pricing, Details, tiers | SaaS Pricing, Details, tiers |
+
+Latency over 1,000 validation tickets: p50 4.36 ms, p95 6.09 ms, max 8.45 ms.
+
+Pipeline (extractive, "Our VPN is down since the firewall update"): `explanations = {"type": ["firewall update",
+"down"], "queue": ["firewall"], "priority": ["firewall", "VPN", "down"]}`, tier PAGE_ONCALL, no error.
+
+**Latency** (1,000 validation tickets, on a busy machine where `predict()` alone took about 5 ms p50, against
+1.4 ms earlier): explain right after predict, as in the pipeline, p50 0.83 ms and p95 1.32 ms. Standalone
+explain needs one full vectorizer pass: p50 3.6 ms, p95 5.5 ms. The 5 ms target is met in the pipeline.
+
+**Reading the results honestly**
+- The words are the model's real reasons, not curated ones. Generic request words ("Details", "provide",
+  "Könnten", "possible") rank high for type=Request because in this dataset they *are* what separates Request
+  from Incident.
+- Explanations also show mistakes. Ticket 2 is routed to Billing and Payments instead of Technical Support, and
+  "Hospital, Daten, relevanter Vorschriften" shows the compliance wording pulled it there. That is the
+  point of the feature in the agent panel.
+- Priority words are the weakest: priority is the hardest head, Macro-F1 0.61.
+
+**Verified:** `pytest -q` -> 90 passed. An independent test-runner found no raises on empty text, "hi", emoji,
+5,000 characters, German-only or the VPN ticket; `explain(None, ...)` gives `{}`. On a quieter machine it measured
+explain after predict at p50 0.33 ms and p95 0.53 ms. Pipeline explanations are filled, error null.
+The ownership review caught one gap: `fit()` refits the vectorizer in place, so the one-entry feature cache could
+serve rows from before the refit. `fit()` now clears it, and a test checks this.
+
+**Teammates must know**
+- **Kaushik:** `result.explanations` is now filled, `{head: [up to 3 phrases]}`; a head can have an empty
+  list. Show the phrases as given, already in the ticket's casing. Highlighting them in the ticket body is safe:
+  each phrase is a real substring of the text, apart from rare lowercase unigram fallbacks.
+- **Step 4 (feedback):** after promotion, set `triage._CACHED = None`. The explain cache follows the new heads
+  by itself.
