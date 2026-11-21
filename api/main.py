@@ -16,6 +16,7 @@ from pydantic import BaseModel
 
 from agent.pipeline import Agent
 from api import a2ui
+from api.auth import PublicUser, Role, authenticate_user, issue_token, register_user, verify_token
 from sentinel import ticket_store
 from sentinel.outage import OutageTracker
 from sentinel.pipeline import SentinelAgent
@@ -121,14 +122,77 @@ class CustomerTriageResponse(BaseModel):
     reply: str | None = None
 
 
+class SignUpRequest(BaseModel):
+    name: str
+    email: str
+    password: str
+    role: Role = "user"
+
+
+class SignInRequest(BaseModel):
+    email: str
+    password: str
+
+
+class AuthResponse(BaseModel):
+    token: str
+    user: PublicUser
+
+
+def _bearer_user(authorization: str | None) -> PublicUser | None:
+    if not authorization:
+        return None
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        raise HTTPException(401, "Invalid Authorization header")
+    user = verify_token(token.strip())
+    if user is None:
+        raise HTTPException(401, "Invalid or expired token")
+    return user
+
+
+def _resolve_role(authorization: str | None, x_role: str) -> str:
+    user = _bearer_user(authorization)
+    if user is not None:
+        return "agent" if user.role == "admin" else "customer"
+    role = x_role.strip().lower()
+    if role not in ("customer", "agent", "manager"):
+        raise HTTPException(422, f"Invalid X-Role {x_role!r}; expected customer, agent, or manager")
+    return role
+
+
+@app.post("/auth/signup", response_model=AuthResponse)
+def auth_signup(req: SignUpRequest) -> AuthResponse:
+    try:
+        user = register_user(req.name, req.email, req.password, req.role)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    return AuthResponse(token=issue_token(user), user=user)
+
+
+@app.post("/auth/signin", response_model=AuthResponse)
+def auth_signin(req: SignInRequest) -> AuthResponse:
+    user = authenticate_user(req.email, req.password)
+    if user is None:
+        raise HTTPException(401, "Invalid email or password")
+    return AuthResponse(token=issue_token(user), user=user)
+
+
+@app.get("/auth/me", response_model=PublicUser)
+def auth_me(authorization: str | None = Header(default=None, alias="Authorization")) -> PublicUser:
+    user = _bearer_user(authorization)
+    if user is None:
+        raise HTTPException(401, "Authentication required")
+    return user
+
+
 @app.post("/triage", response_model=SentinelResult | CustomerTriageResponse)
 def triage_ticket(
     req: TicketInput,
     x_role: str = Header(default="customer", alias="X-Role"),
+    authorization: str | None = Header(default=None, alias="Authorization"),
 ) -> SentinelResult | CustomerTriageResponse:
-    role = x_role.strip().lower()
-    if role not in ("customer", "agent", "manager"):
-        raise HTTPException(422, f"Invalid X-Role {x_role!r}; expected customer, agent, or manager")
+    role = _resolve_role(authorization, x_role)
 
     agent = get_sentinel_agent()
     result = agent.triage(req.subject, req.body, k=req.k, provider=req.provider, fallback=req.fallback)
@@ -147,11 +211,12 @@ def triage_ticket(
 
 
 @app.get("/tickets")
-def list_stored_tickets(x_role: str = Header(default="customer", alias="X-Role")) -> list[dict[str, Any]]:
+def list_stored_tickets(
+    x_role: str = Header(default="customer", alias="X-Role"),
+    authorization: str | None = Header(default=None, alias="Authorization"),
+) -> list[dict[str, Any]]:
     """List tickets from ticket_store, filtered by caller role."""
-    role = x_role.strip().lower()
-    if role not in ("customer", "agent", "manager"):
-        raise HTTPException(422, f"Invalid X-Role {x_role!r}; expected customer, agent, or manager")
+    role = _resolve_role(authorization, x_role)
     records = ticket_store.list_tickets()
     if role == "customer":
         out: list[dict[str, Any]] = []
@@ -182,8 +247,15 @@ class TicketActionRequest(BaseModel):
 
 
 @app.post("/tickets/{ticket_id}/action")
-def update_ticket_status(ticket_id: str, req: TicketActionRequest) -> dict[str, Any]:
-    """Approve/close a ticket in ticket_store."""
+def update_ticket_status(
+    ticket_id: str,
+    req: TicketActionRequest,
+    authorization: str | None = Header(default=None, alias="Authorization"),
+) -> dict[str, Any]:
+    """Approve/close a ticket in ticket_store (admin only when authenticated)."""
+    user = _bearer_user(authorization)
+    if user is not None and user.role != "admin":
+        raise HTTPException(403, "Admin role required")
     rec = ticket_store.get_ticket(ticket_id)
     if rec is None:
         raise HTTPException(404, f"Ticket {ticket_id!r} not found")
@@ -193,8 +265,13 @@ def update_ticket_status(ticket_id: str, req: TicketActionRequest) -> dict[str, 
 
 
 @app.get("/outage")
-def get_outage_status() -> dict[str, Any]:
-    """Return active OutageTracker burst alert if present."""
+def get_outage_status(
+    authorization: str | None = Header(default=None, alias="Authorization"),
+) -> dict[str, Any]:
+    """Return active OutageTracker burst alert if present (admin only when authenticated)."""
+    user = _bearer_user(authorization)
+    if user is not None and user.role != "admin":
+        raise HTTPException(403, "Admin role required")
     alert = _OUTAGE_TRACKER.check()
     if not alert:
         return {"active": False}
