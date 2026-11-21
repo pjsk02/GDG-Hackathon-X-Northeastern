@@ -8,6 +8,7 @@ Vectors are tagged with the embedder name so switching embedders never mixes dim
 
 import json
 import sqlite3
+import threading
 from pathlib import Path
 
 import numpy as np
@@ -39,6 +40,8 @@ class VectorStore:
             path.parent.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(path, check_same_thread=False)
         self.db.executescript(SCHEMA)
+        # One connection shared by the smart queue's worker threads: serialize access to it and to the cache.
+        self._lock = threading.RLock()
         self.embedder = embedder
         self._cache: tuple[list[str], np.ndarray] | None = None
 
@@ -54,39 +57,46 @@ class VectorStore:
         if embed_texts is not None and len(embed_texts) != len(chunks):
             raise ValueError("embed_texts must be the same length as chunks")
         vecs = self.embedder.embed(embed_texts if embed_texts is not None else [c.text for c in chunks])
-        self.db.executemany(
-            "INSERT OR REPLACE INTO chunks VALUES (?,?,?,?,?,?,?,?)",
-            [
-                (c.id, c.source, c.kind, c.text, c.locator, json.dumps(c.metadata), self.embedder.name, v.tobytes())
-                for c, v in zip(chunks, vecs)
-            ],
-        )
-        self.db.commit()
-        self._cache = None
+        with self._lock:
+            self.db.executemany(
+                "INSERT OR REPLACE INTO chunks VALUES (?,?,?,?,?,?,?,?)",
+                [
+                    (c.id, c.source, c.kind, c.text, c.locator, json.dumps(c.metadata), self.embedder.name,
+                     v.tobytes())
+                    for c, v in zip(chunks, vecs)
+                ],
+            )
+            self.db.commit()
+            self._cache = None
         return len(chunks)
 
     def delete_source(self, source: str) -> None:
-        self.db.execute("DELETE FROM chunks WHERE source = ?", (source,))
-        self.db.commit()
-        self._cache = None
+        with self._lock:
+            self.db.execute("DELETE FROM chunks WHERE source = ?", (source,))
+            self.db.commit()
+            self._cache = None
 
     def reset(self) -> None:
-        self.db.execute("DELETE FROM chunks")
-        self.db.commit()
-        self._cache = None
+        with self._lock:
+            self.db.execute("DELETE FROM chunks")
+            self.db.commit()
+            self._cache = None
 
     def count(self) -> int:
-        return self.db.execute(
-            "SELECT COUNT(*) FROM chunks WHERE embedder = ?", (self.embedder.name,)
-        ).fetchone()[0]
+        with self._lock:
+            return self.db.execute(
+                "SELECT COUNT(*) FROM chunks WHERE embedder = ?", (self.embedder.name,)
+            ).fetchone()[0]
 
     def sources(self) -> list[str]:
-        return [r[0] for r in self.db.execute("SELECT DISTINCT source FROM chunks ORDER BY source")]
+        with self._lock:
+            return [r[0] for r in self.db.execute("SELECT DISTINCT source FROM chunks ORDER BY source")]
 
     def get(self, chunk_id: str) -> Chunk | None:
-        row = self.db.execute(
-            "SELECT id, source, kind, text, locator, metadata FROM chunks WHERE id = ?", (chunk_id,)
-        ).fetchone()
+        with self._lock:
+            row = self.db.execute(
+                "SELECT id, source, kind, text, locator, metadata FROM chunks WHERE id = ?", (chunk_id,)
+            ).fetchone()
         return self._row_to_chunk(row) if row else None
 
     def search(self, query: str, k: int = 6, kind: SourceKind | None = None) -> list[RetrievedChunk]:
@@ -111,25 +121,26 @@ class VectorStore:
         return self._matrix()
 
     def _matrix(self) -> tuple[list[str], np.ndarray]:
-        if self._cache is None:
-            # Stream the cursor into one preallocated array instead of fetchall() + np.stack:
-            # same result at a fraction of the peak memory, which matters on a laptop that is
-            # also hosting two local models (22,869 x 768 float32 = 67 MB on its own).
-            n = self.count()
-            cursor = self.db.execute("SELECT id, vec FROM chunks WHERE embedder = ?", (self.embedder.name,))
-            ids, matrix = [], None
-            for i, (chunk_id, blob) in enumerate(cursor):
+        with self._lock:
+            if self._cache is None:
+                # Stream the cursor into one preallocated array instead of fetchall() + np.stack:
+                # same result at a fraction of the peak memory, which matters on a laptop that is
+                # also hosting two local models (22,869 x 768 float32 = 67 MB on its own).
+                n = self.count()
+                cursor = self.db.execute("SELECT id, vec FROM chunks WHERE embedder = ?", (self.embedder.name,))
+                ids, matrix = [], None
+                for i, (chunk_id, blob) in enumerate(cursor):
+                    if matrix is None:
+                        matrix = np.empty((n, len(blob) // 4), dtype=np.float32)
+                    if i < n:
+                        matrix[i] = np.frombuffer(blob, dtype=np.float32)
+                        ids.append(chunk_id)
                 if matrix is None:
-                    matrix = np.empty((n, len(blob) // 4), dtype=np.float32)
-                if i < n:
-                    matrix[i] = np.frombuffer(blob, dtype=np.float32)
-                    ids.append(chunk_id)
-            if matrix is None:
-                matrix = np.zeros((0, 0), dtype=np.float32)
-            elif len(ids) < n:  # rows changed under us; keep only what was read
-                matrix = matrix[: len(ids)]
-            self._cache = (ids, matrix)
-        return self._cache
+                    matrix = np.zeros((0, 0), dtype=np.float32)
+                elif len(ids) < n:  # rows changed under us; keep only what was read
+                    matrix = matrix[: len(ids)]
+                self._cache = (ids, matrix)
+            return self._cache
 
     @staticmethod
     def _row_to_chunk(row) -> Chunk:
