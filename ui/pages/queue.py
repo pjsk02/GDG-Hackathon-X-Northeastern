@@ -5,7 +5,7 @@ from __future__ import annotations
 import streamlit as st
 
 from sentinel import ticket_store
-from ui.shared import fire_burst, get_agent, get_queue, get_tracker, render_outage_banner
+from ui.shared import TIER_META, fire_burst, get_agent, get_queue, get_tracker, render_outage_banner
 
 
 def _sync_observed_done(snap: dict) -> None:
@@ -29,8 +29,9 @@ def _render_ticket_list(title: str, ticket_ids: list[str]) -> None:
         rec = ticket_store.get_ticket(tid)
         if rec and rec.result:
             t = rec.result.triage
+            tier_icon = TIER_META.get(rec.result.tier or "", ("", "⚪", ""))[1]
             subj = rec.subject or rec.body[:40]
-            st.markdown(f"- `{tid}` **{t.priority}/{t.type}** — {subj}")
+            st.markdown(f"- {tier_icon} `{tid}` **{t.priority}/{t.type}** — {subj}")
         elif rec:
             st.markdown(f"- `{tid}` — {rec.subject or rec.body[:40]}")
         else:

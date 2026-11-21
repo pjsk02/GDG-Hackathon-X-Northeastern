@@ -29,3 +29,9 @@
 - **Files changed:** `ui/shared.py`, `ui/pages/queue.py`, `ui/pages/agent.py`, `ui/pages/manager.py`, `tests/test_ui_queue.py`, `docs/progress/Kaushik.md`
 - **Verified:** `uv run --no-sync pytest -q` -> `84 passed in 3.46s` (burst raises Major Incident banner, concurrency updates, and "Group into one incident" invokes `incidents.group_burst`).
 - **Open issues / notes for teammates:** None.
+
+## Step 6 - Polish (pre-demo)
+- **Built:** Added `.streamlit/config.toml` for consistent light theme colors and aligned `ui/pages/queue.py` ticket items with `TIER_META` icons/labels.
+- **Files changed:** `.streamlit/config.toml`, `ui/pages/queue.py`, `docs/progress/Kaushik.md`
+- **Verified:** `uv run --no-sync pytest -q` -> `84 passed in 3.74s`; `tests/test_team_contracts.py` -> `6 passed in 1.62s`.
+- **Open issues / notes for teammates:** `docs/demo/script.md`, the dataset (`data/raw/`), and teammates' merged branches are not yet on `main`; full demo walkthrough, 3 README screenshots, and PR into `main` remain once those are ready.
