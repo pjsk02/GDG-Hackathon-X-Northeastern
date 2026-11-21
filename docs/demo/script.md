@@ -6,11 +6,16 @@ Tickets are in [demo_tickets.md](demo_tickets.md).
 
 ## Before going on stage (T-10 min)
 
-- [ ] On merged main: `make sentinel-index` with `EMBED_PROVIDER=gemini`, then `make tune && make dial`.
-- [ ] `.env`: `LLM_PROVIDER=gemini`, `LLM_FALLBACK=ollama,extractive`, `GEMINI_API_KEY` set. If you use the local
-      fallback, set `OLLAMA_KEEP_ALIVE=-1m` and warm it up.
-- [ ] `make console`; open the customer, agent board, queue and manager pages in four browser tabs.
-- [ ] Reset the ticket store so the board starts empty; `data/eval/latest/report.json` and `safety_dial.json` exist.
+- [ ] Ollama running with `embeddinggemma-2:570m` (index) and `gemma4:12b` (fallback writer): `ollama list`.
+- [ ] `.env`: `LLM_PROVIDER=gemini`, `GEMINI_MODEL=gemini-3.5-flash-lite`, `LLM_FALLBACK=ollama,extractive`,
+      `OLLAMA_MODEL=gemma4:12b`, `EMBED_PROVIDER=ollama`, `GEMINI_API_KEY` set. Optional: `OLLAMA_KEEP_ALIVE=-1m`.
+- [ ] Data built once (skip if present): `make sentinel-split`, the calibrated model, the index
+      (`EMBED_PROVIDER=ollama make sentinel-index`, ~6 min), `make tune && make dial`, `make sentinel-eval`.
+- [ ] `make console` (http://localhost:8501); the sidebar shows Embedder `ollama-embeddinggemma-2:570m` and 22,869
+      tickets. Open the Customer, Agent, Smart queue and Manager pages in four browser tabs.
+- [ ] Empty the board: `python -c "from sentinel import ticket_store; ticket_store.reset()"`, then "Clear outage
+      buffer" in the sidebar. `data/eval/latest/report.json` and `data/eval/safety_dial.json` exist.
+- [ ] Warm-up run: submit ticket 11 once (first call loads the models), then reset again.
 - [ ] Paste tickets 1, 3 and 4 into a text file ready to copy. Browser zoom at 125%. Notifications off.
 - [ ] Timer visible to the speaker.
 
