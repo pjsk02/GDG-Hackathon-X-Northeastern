@@ -6,8 +6,9 @@ import html
 
 import streamlit as st
 
-from sentinel import ticket_store
+from sentinel import feedback, ticket_store
 from sentinel.ticket_store import TicketRecord
+from shared.contracts import LabelCorrection
 from ui.shared import (
     PRESETS,
     TIER_META,
@@ -186,6 +187,35 @@ def _render_side_panel(rec: TicketRecord) -> None:
             st.warning(f"`{g.kind}` (`{g.text}`): {g.reason}")
     else:
         st.caption("No guard findings (number-and-promise guard will appear here when triggered).")
+
+    st.divider()
+
+    # 8. Correct labels form
+    with st.expander("✏️ Correct labels", expanded=False):
+        with st.form(f"correct_labels_{rec.ticket_id}"):
+            head = st.selectbox("Field", ["type", "queue", "priority"], key=f"corr_head_{rec.ticket_id}")
+            predicted_val = str(getattr(res.triage, head))
+            corrected_val = st.text_input(
+                f"Corrected {head} (predicted: {predicted_val})",
+                value=predicted_val,
+                key=f"corr_val_{rec.ticket_id}",
+            )
+            if st.form_submit_button("Save correction"):
+                cleaned = corrected_val.strip()
+                if not cleaned:
+                    st.warning("Enter a corrected label first.")
+                else:
+                    text = f"{rec.subject or ''}\n{rec.body}".strip()
+                    feedback.record_correction(
+                        LabelCorrection(
+                            ticket_id=rec.ticket_id,
+                            text=text,
+                            head=head,  # type: ignore[arg-type]
+                            predicted=predicted_val,
+                            corrected=cleaned,
+                        )
+                    )
+                    st.success(f"Saved {head} correction: `{predicted_val}` → `{cleaned}`.")
 
 
 def render_agent_page() -> None:

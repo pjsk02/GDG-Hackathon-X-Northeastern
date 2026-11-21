@@ -17,3 +17,9 @@
 - **Files changed:** `ui/shared.py`, `ui/pages/customer.py`, `api/main.py`, `tests/test_api.py`, `tests/test_ui_customer.py`, `docs/progress/Kaushik.md`
 - **Verified:** `uv run --no-sync pytest -q` -> `78 passed in 2.88s` (all API TestClient and Customer AppTest checks pass).
 - **Open issues / notes for teammates:** None.
+
+## Step 4 - Manager page and corrections
+- **Built:** Implemented `ui/pages/manager.py` with open/in-progress/closed/total ticket counts, tier rates, safety dial chart from `data/eval/safety_dial.json` (with `make dial` prompt when missing), holdout metrics from `data/eval/latest/report.json`, calibration from `data/eval/calibration.json` if present, saved corrections list, and a Retrain button calling `feedback.retrain_challenger()`. Added the "Correct labels" form to `ui/pages/agent.py` calling `feedback.record_correction(LabelCorrection(...))`. Added `tests/test_ui_manager.py`.
+- **Files changed:** `ui/pages/manager.py`, `ui/pages/agent.py`, `tests/test_ui_manager.py`, `docs/progress/Kaushik.md`
+- **Verified:** `uv run --no-sync pytest -q` -> `82 passed in 3.33s` (Manager page renders with/without eval files, Retrain displays status/metrics, and Agent panel saves corrections).
+- **Open issues / notes for teammates:** None.
