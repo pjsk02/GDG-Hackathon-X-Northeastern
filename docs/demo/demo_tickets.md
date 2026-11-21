@@ -26,7 +26,7 @@ All names, emails, phone numbers and account ids below are made up.
 - **Subject:** Kein Zugriff mehr auf das Kundenportal
 - **Body:** Guten Morgen, seit dem Update heute Nacht kann sich in unserer Praxis niemand mehr im Kundenportal
   anmelden. Die Fehlermeldung lautet "Zugriff verweigert". Bitte melden Sie sich dringend bei mir unter
-  lena.hoffmann@praxis-beispiel.de oder +49 151 2345 6789. Unsere Kundennummer ist KD-5523190.
+  lena.hoffmann@praxis-beispiel.de oder +49 151 2345 6789. Kundennummer: KUNDE-5523190.
 - **Look for:** "What the AI saw" shows the email, phone and customer number masked; language DE; page on-call;
   past tickets about login after an update.
 
