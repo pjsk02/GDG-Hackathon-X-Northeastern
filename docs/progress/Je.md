@@ -80,3 +80,51 @@ Report written to `data/eval/sentinel-20261121-115954/` (local, gitignored).
 - `scripts/check_ownership.py` reads `git status --porcelain`, which collapses a brand-new untracked folder to
   `docs/progress/` and so fails a teammate's first progress log. Workaround: `git add docs/progress/<You>.md`
   before `make check-ownership`. Lead fix on main: use `git status --porcelain -uall`.
+
+## Step 2 - Tune thresholds on the validation slice (F1, leakage fix) (2026-11-21)
+
+**Built:** `eval/tune_thresholds.py` (`make tune`) and `tests/test_thresholds_tuning.py` (10 offline tests).
+
+How it works:
+- Reads **only** `data/sentinel/kb_train.csv` and cuts it with `dataset.split_train_val` (train 20,582 / validation
+  2,287). It never calls `load_split()`, so the holdout file is not opened. A test makes sure of that.
+- Fits a `TriageModel` on the train slice in memory (~50 s). `--model PATH` loads a train-only model instead
+  (for Shishir's model once it exists).
+- Retrieval similarity per validation ticket comes from the real index with the ticket's own row removed. The
+  index holds all of kb_train, so a validation ticket would otherwise find itself at similarity 1.0. Fast path:
+  a batched embed + matrix product. Fallback: `store.search(k=2)` and drop the self-hit.
+- Vectorised R1-R5 (a test checks they agree with `escalation.pre_draft_gate` rule by rule). Tiers come from the
+  real `escalation.decide_tier`, so the tuning follows Kaushik's three-tier mapping once it is merged.
+- Grid: triage_confidence_min 0.30-0.80, high_priority_alert_probability 0.20-0.70 (step 0.05),
+  retrieval_similarity_min from fixed values plus quantiles of the observed similarities (1,452 points).
+- Objective: lowest on-call rate with high-priority-incident (HPI) recall >= 0.90 on validation.
+
+### Result (validation, 2,287 tickets, 394 HPI, hash-1024 index, placeholder decide_tier)
+
+| | conf_min | p_high_alert | sim_min | HPI recall | on-call | review | auto-draft |
+|---|---|---|---|---|---|---|---|
+| settings defaults | 0.55 | 0.50 | 0.55 | 0.878 | 0.649 | 0.000 | 0.351 |
+| **chosen** | **0.40** | **0.25** | **0.55** | **0.901** | **0.614** | 0.000 | **0.386** |
+
+The chosen point beats the defaults on both axes: higher recall and 3.5 points fewer on-call pages.
+`thresholds.load(Settings())` now returns `{'triage_confidence_min': 0.4, 'retrieval_similarity_min': 0.55,
+'high_priority_alert_probability': 0.25}`. The pipeline picks this up on its next ticket.
+
+`data/sentinel/thresholds.json` (local, gitignored) holds the three keys plus `validation` metrics,
+`baseline_defaults`, `target_met`, `model`, `embedder` and the grid.
+
+### Verified
+
+- `make tune`: exit 0, target met, `thresholds.json` written; `thresholds.load()` returns the tuned values.
+- `pytest -q`: 66 passed (10 new).
+- Holdout not read: the tuner reads `kb_train.csv` only; `test_load_train_val_never_reads_the_holdout`.
+
+### Open issues / notes for teammates
+
+- **Re-tune after Kaushik's three-tier `decide_tier` lands.** With the placeholder every escalation is on-call
+  (review = 0). After the merge R3/R4 go to agent review and the on-call rate will drop a lot. Just run `make tune`.
+- **Re-tune after the demo index is built (Step 6).** Similarity is embedder-specific: hash-1024 top similarities
+  sit around 0.53-0.69, and Gemini's scale will differ. The grid adapts via quantiles.
+- R6 (grounding) and R7 (injection) are not simulated, because they need a draft. They can only add escalations.
+- Shishir: `python -m eval.tune_thresholds --model <train-only.joblib>` uses your model once it exists.
+- sklearn 1.8 prints a FutureWarning for `n_jobs` in `sentinel/triage.py` (harmless; Shishir's file).
