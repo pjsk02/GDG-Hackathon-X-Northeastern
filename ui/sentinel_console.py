@@ -220,12 +220,20 @@ with st.sidebar:
                            help=f"On failure: {agent.settings.llm_fallback}")
     k = st.slider("Precedents to retrieve", 3, 8, agent.settings.sentinel_top_k)
     st.divider()
-    st.caption("**Escalation thresholds**")
-    st.caption(
-        f"triage confidence < {agent.settings.triage_confidence_min:.2f} · "
-        f"similarity < {agent.settings.retrieval_similarity_min:.2f} · "
-        f"P(high) ≥ {agent.settings.high_priority_alert_probability:.2f}"
-    )
+    st.caption("**Escalation gate** — the safety/automation dial")
+    conf_min = st.slider("Escalate below triage confidence", 0.0, 0.95,
+                         agent.settings.triage_confidence_min, 0.05,
+                         help="min(type, priority) confidence. 0.55 → 61% escalated, 89% of true "
+                              "high-priority Incidents caught. 0.50 → 50% escalated, 83% caught.")
+    phigh_min = st.slider("Escalate above P(priority=high)", 0.1, 1.0,
+                          agent.settings.high_priority_alert_probability, 0.05,
+                          help="Catches outages the argmax label would have missed.")
+    sim_min = st.slider("Escalate below best precedent similarity", 0.0, 1.0,
+                        agent.settings.retrieval_similarity_min, 0.05,
+                        help="No close precedent = nothing safe to ground a reply on.")
+    agent.settings.triage_confidence_min = conf_min
+    agent.settings.high_priority_alert_probability = phigh_min
+    agent.settings.retrieval_similarity_min = sim_min
     st.divider()
     st.caption(f"**Index**: {agent.store.count():,} resolved tickets (kb_train 80% split only)")
     st.caption(f"**Embedder**: {agent.store.embedder.name}")

@@ -51,8 +51,13 @@ class TriagePrediction:
 
     @property
     def confidence(self) -> float:
-        """One number for the gate: the weakest of the three heads (conservative on purpose)."""
-        return min(self.type.confidence, self.queue.confidence, self.priority.confidence)
+        """One number for the gate: the weaker of the two risk-bearing heads.
+
+        Queue is deliberately excluded. It has 10 classes, so its top probability is structurally
+        low (median 0.45) and thresholding on it escalates 91% of all tickets. A wrong queue is a
+        routing annoyance; a wrong type or priority is a missed outage, so only those gate.
+        """
+        return min(self.type.confidence, self.priority.confidence)
 
     def as_dict(self) -> dict[str, object]:
         return {

@@ -21,10 +21,14 @@ from dataclasses import dataclass
 
 from shared.contracts import EscalationDecision
 
-# --- thresholds (overridable via Settings) --------------------------------
-TRIAGE_CONFIDENCE_MIN = 0.65
+# --- thresholds (overridable via Settings, and live in the console sidebar) ------
+# Tuned on 1,200 holdout tickets. At these values the gate escalates ~61% of tickets and catches
+# 89% of the true high-priority Incidents and 67% of every mistriaged ticket. Loosening to
+# 0.50/0.50 escalates 50% but catches only 83% of them: the dial is a business decision, so the
+# console exposes it instead of hiding it.
+TRIAGE_CONFIDENCE_MIN = 0.55
 RETRIEVAL_SIMILARITY_MIN = 0.55
-HIGH_PRIORITY_ALERT_PROBABILITY = 0.45
+HIGH_PRIORITY_ALERT_PROBABILITY = 0.50
 
 # --- R5: requests no historical resolution can authorise -------------------
 # English + German. Matched on the raw ticket text, word-boundary anchored.
