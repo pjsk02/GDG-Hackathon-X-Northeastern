@@ -1,0 +1,63 @@
+{
+  "permissions": {
+    "defaultMode": "acceptEdits",
+    "allow": [
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(git show*)",
+      "Bash(git fetch*)",
+      "Bash(git pull --ff-only*)",
+      "Bash(git merge*)",
+      "Bash(git add*)",
+      "Bash(git commit*)",
+      "Bash(git switch*)",
+      "Bash(git checkout*)",
+      "Bash(git branch*)",
+      "Bash(git stash*)",
+      "Bash(git rev-parse*)",
+      "Bash(git restore*)",
+      "Bash(git push origin *-Branch)",
+      "Bash(git push -u origin *-Branch)",
+      "Bash(make *)",
+      "Bash(uv *)",
+      "Bash(python *)",
+      "Bash(python3 *)",
+      "Bash(pytest*)",
+      "Bash(streamlit *)",
+      "Bash(ls*)",
+      "Bash(mkdir -p data*)",
+      "Bash(curl -sL https://raw.githubusercontent.com/pjsk02/GDG-Hackathon-X-Northeastern/*)",
+      "Bash(curl -L -o data/raw/* https://huggingface.co/datasets/Tobi-Bueck/customer-support-tickets/*)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:github.com)"
+    ],
+    "deny": [
+      "Bash(git push origin main*)",
+      "Bash(git push * main)",
+      "Bash(git push *:main)",
+      "Bash(git push --force*)",
+      "Bash(git push -f*)",
+      "Bash(git push * --force*)",
+      "Bash(git push * -f)",
+      "Bash(git rebase*)",
+      "Bash(git reset --hard*)",
+      "Bash(git branch -D*)",
+      "Bash(git push origin --delete*)",
+      "Read(.env)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if python3 -c '' >/dev/null 2>&1; then exec python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/ownership_guard.py\"; else exec python \"$CLAUDE_PROJECT_DIR/.claude/hooks/ownership_guard.py\"; fi"
+          }
+        ]
+      }
+    ]
+  }
+}

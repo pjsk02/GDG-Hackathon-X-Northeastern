@@ -7,7 +7,7 @@ from typing import Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 LLMProvider = Literal["extractive", "ollama", "gemini"]
-EmbedProvider = Literal["hash", "ollama"]
+EmbedProvider = Literal["hash", "ollama", "gemini"]
 
 
 class Settings(BaseSettings):
@@ -63,6 +63,19 @@ class Settings(BaseSettings):
     high_priority_alert_probability: float = 0.50
     # Mask emails/phones/IPs/IBANs out of the text sent to any LLM (the console still shows the original).
     mask_pii_in_prompts: bool = True
+
+    # --- team additions (pre-declared so nobody has to edit this shared file) ----
+    # Gemini embeddings for retrieval (owner C, memory/embedder.py). Check the model name in AI Studio.
+    gemini_embed_model: str = "gemini-embedding-001"
+    gemini_embed_batch: int = 64
+    # Validation slice: the last N% of kb_train, used for threshold tuning and calibration (owners A, B).
+    validation_fraction: float = 0.10
+    # Smart queue (owner C, sentinel/queue.py): how many tickets may call the LLM at the same time.
+    queue_concurrency: int = 4
+    # Ticket store shared by all UI pages (owner C, sentinel/ticket_store.py).
+    ticket_store_path: Path = Path("data/tickets.sqlite")
+    # Where agent label corrections go for the learning loop (owner B, sentinel/feedback.py).
+    corrections_path: Path = Path("data/sentinel/corrections.jsonl")
 
 
 @lru_cache

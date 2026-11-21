@@ -15,6 +15,10 @@ dependencies = [
     "pydantic>=2.14",
     "pydantic-settings>=2.16",
     "numpy>=2.5",
+    # SentinelDesk triage + data split
+    "pandas>=2.2",
+    "scikit-learn>=1.5",
+    "joblib>=1.4",
 ]
 
 [project.optional-dependencies]
@@ -31,7 +35,7 @@ dev = [
 all = ["grounded-agent[gemini,ui,plots,docs,dev]"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["agent", "api", "eval", "memory", "shared"]
+packages = ["agent", "api", "eval", "memory", "sentinel", "shared"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

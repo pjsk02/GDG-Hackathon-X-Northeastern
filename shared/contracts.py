@@ -159,6 +159,10 @@ class SentinelDraft(BaseModel):
         description="Required unless refused: the quotes the reply is built from. [] only when refused."
     )
     draft_reply: str = Field(default="", description="The reply, written in reply_language. Empty when refused.")
+    briefing: str = Field(
+        default="",
+        description="One sentence (max 25 words) summarising the ticket for the agent, in English. No advice.",
+    )
 
 
 class VerifiedCitation(BaseModel):
@@ -195,6 +199,29 @@ class TriageLabels(BaseModel):
     priority_probabilities: dict[str, float] = Field(default_factory=dict)
 
 
+Tier = Literal["AUTO_DRAFT", "AGENT_REVIEW", "PAGE_ONCALL"]
+GuardKind = Literal["number", "money", "percent", "date", "promise"]
+
+
+class GuardFinding(BaseModel):
+    """Number-and-promise guard (owner D, sentinel/claims.py): a claim in the reply no cited quote backs."""
+
+    kind: GuardKind
+    text: str = Field(description="The exact span from draft_reply, e.g. '48 hours' or 'full refund'.")
+    reason: str = Field(description="Why it failed, e.g. 'not found in any verified quote'.")
+
+
+class LabelCorrection(BaseModel):
+    """An agent fixing a wrong label (owner B, sentinel/feedback.py stores these)."""
+
+    ticket_id: str
+    text: str = Field(description="subject + body, exactly what the classifier saw")
+    head: Literal["type", "queue", "priority"]
+    predicted: str
+    corrected: str
+    created_at: float = 0.0
+
+
 class SentinelResult(BaseModel):
     """One triaged ticket, end to end. This is what the console and the API return."""
 
@@ -206,6 +233,19 @@ class SentinelResult(BaseModel):
     triage: TriageLabels
     escalation: EscalationDecision
     escalation_reasons: list[str] = Field(default_factory=list)
+    # --- team additions (pre-declared; see docs/team/README.md for who fills each one) ---
+    tier: Tier | None = Field(default=None, description="Three-tier gate (owner E, sentinel/escalation.py).")
+    briefing: str = Field(default="", description="One-line summary for the agent (owner D, from SentinelDraft).")
+    explanations: dict[str, list[str]] = Field(
+        default_factory=dict, description="head -> words that drove the label (owner B, sentinel/explain.py)."
+    )
+    injection_flags: list[str] = Field(
+        default_factory=list, description="Prompt-injection hits, rule R7 (owner D, sentinel/injection.py)."
+    )
+    guard_findings: list[GuardFinding] = Field(
+        default_factory=list, description="Unbacked numbers/promises in the draft (owner D, sentinel/claims.py)."
+    )
+    pii_masked_body: str = Field(default="", description="The text the LLM actually saw ('What the AI saw').")
 
     precedents: list[Precedent] = Field(default_factory=list)
     top_similarity: float = 0.0

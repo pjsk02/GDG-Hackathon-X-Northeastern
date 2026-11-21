@@ -1,0 +1,132 @@
+{
+  "_about": "Who may edit what. Read by .claude/hooks/ownership_guard.py (blocks edits) and scripts/check_ownership.py (checks a branch before push). Globs use fnmatch: * also matches '/'. Only Je edits this file, on main.",
+  "branches": {
+    "Je-Branch": {
+      "person": "Je",
+      "role": "A - Data, evaluation, README, demo (integration lead)",
+      "owns": [
+        "sentinel/dataset.py",
+        "sentinel/thresholds.py",
+        "eval/__init__.py",
+        "eval/sentinel_eval.py",
+        "eval/sentinel_cases.jsonl",
+        "eval/tune_thresholds.py",
+        "eval/safety_dial.py",
+        "eval/run.py",
+        "eval/cases.jsonl",
+        "eval/cases_repo.jsonl",
+        "README.md",
+        "AUDIT.md",
+        "samples/*",
+        "docs/demo/*",
+        "docs/scaffold.md",
+        "docs/progress/Je.md",
+        "docs/requests/Je.md",
+        "tests/test_team_contracts.py",
+        "tests/test_dataset*.py",
+        "tests/test_eval*.py",
+        "tests/test_thresholds*.py"
+      ]
+    },
+    "Shishir-Branch": {
+      "person": "Shishir",
+      "role": "B - Triage model: calibration, explanations, learning loop",
+      "owns": [
+        "sentinel/triage.py",
+        "sentinel/explain.py",
+        "sentinel/feedback.py",
+        "sentinel/calibration.py",
+        "docs/progress/Shishir.md",
+        "docs/requests/Shishir.md",
+        "tests/test_triage*.py",
+        "tests/test_explain*.py",
+        "tests/test_feedback*.py",
+        "tests/test_calibration*.py"
+      ]
+    },
+    "Rithwik-Branch": {
+      "person": "Rithwik",
+      "role": "C - Retrieval, ticket store, smart queue, outage and incidents",
+      "owns": [
+        "memory/embedder.py",
+        "memory/store.py",
+        "sentinel/ingest_tickets.py",
+        "sentinel/ticket_store.py",
+        "sentinel/smart_queue.py",
+        "sentinel/simulator.py",
+        "sentinel/outage.py",
+        "sentinel/incidents.py",
+        "eval/crosslingual_check.py",
+        "docs/progress/Rithwik.md",
+        "docs/requests/Rithwik.md",
+        "tests/test_embedder*.py",
+        "tests/test_store*.py",
+        "tests/test_ticket_store*.py",
+        "tests/test_smart_queue*.py",
+        "tests/test_simulator*.py",
+        "tests/test_outage*.py",
+        "tests/test_incidents*.py",
+        "tests/test_crosslingual*.py"
+      ]
+    },
+    "Sujitha-Branch": {
+      "person": "Sujitha",
+      "role": "D - Gemini writer and guardrails",
+      "owns": [
+        "sentinel/writer.py",
+        "sentinel/claims.py",
+        "sentinel/injection.py",
+        "sentinel/pii.py",
+        "agent/llm_router.py",
+        "eval/cases_guardrails.jsonl",
+        "docs/progress/Sujitha.md",
+        "docs/requests/Sujitha.md",
+        "tests/test_writer*.py",
+        "tests/test_claims*.py",
+        "tests/test_injection*.py",
+        "tests/test_pii*.py",
+        "tests/test_gemini*.py",
+        "tests/test_llm_router*.py"
+      ]
+    },
+    "Kaushik-Branch": {
+      "person": "Kaushik",
+      "role": "E - UI pages, three-tier gate, pipeline wiring, API",
+      "owns": [
+        "sentinel/escalation.py",
+        "sentinel/pipeline.py",
+        "ui/*",
+        "api/*",
+        ".streamlit/*",
+        "docs/progress/Kaushik.md",
+        "docs/requests/Kaushik.md",
+        "tests/test_escalation*.py",
+        "tests/test_sentinel_pipeline*.py",
+        "tests/test_ui*.py",
+        "tests/test_api*.py"
+      ]
+    }
+  },
+  "frozen": {
+    "_about": "Shared files. Nobody edits these on their own branch. Ask Je in docs/requests/<YourName>.md; Je changes them on main and everyone runs `make sync`.",
+    "paths": [
+      "shared/*",
+      "pyproject.toml",
+      "requirements.txt",
+      "Makefile",
+      ".env.example",
+      ".gitignore",
+      "CLAUDE.md",
+      ".claude/*",
+      "scripts/*",
+      "docs/PRD.md",
+      "docs/team/*",
+      "docs/prompts/*",
+      "docs/requests/README.md"
+    ]
+  },
+  "always_allowed": [
+    ".claude/settings.local.json",
+    "CLAUDE.local.md"
+  ]
+}

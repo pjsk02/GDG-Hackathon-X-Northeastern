@@ -113,3 +113,13 @@ def post_draft_gate(outcome: GateOutcome, grounded: bool, refused: bool, refusal
     elif not grounded:
         reasons.append("R6 ungrounded draft: no cited quote was found verbatim in a retrieved resolution")
     return GateOutcome("ESCALATE" if reasons else "AUTO_DRAFT", reasons)
+
+
+def decide_tier(decision: EscalationDecision, reasons: list[str]) -> str:
+    """Three-tier gate (N1). Owner: E (Kaushik).
+
+    PLACEHOLDER: maps the old two-way decision straight across. E replaces it with the PRD mapping:
+    R1, R2, R5, R7 -> "PAGE_ONCALL"; only R3, R4, R6 -> "AGENT_REVIEW"; no reasons -> "AUTO_DRAFT".
+    Keep the signature: sentinel/pipeline.py calls decide_tier(result.escalation, result.escalation_reasons).
+    """
+    return "PAGE_ONCALL" if decision == "ESCALATE" else "AUTO_DRAFT"

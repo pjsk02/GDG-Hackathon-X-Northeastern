@@ -77,6 +77,26 @@ def load_split() -> tuple[pd.DataFrame, pd.DataFrame]:
     return kb, test
 
 
+VAL_FRACTION = 0.10
+
+
+def split_train_val(kb_train_df: pd.DataFrame, fraction: float = VAL_FRACTION) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Cut the knowledge base into (train, validation). The validation slice is the LAST `fraction`.
+
+    kb_train is already shuffled with seed 42, so the tail is a random sample and the cut is
+    reproducible. Tune thresholds and calibrate on validation; touch the holdout only for final scores.
+    """
+    cut = int(len(kb_train_df) * (1.0 - fraction))
+    return kb_train_df.iloc[:cut].copy(), kb_train_df.iloc[cut:].copy()
+
+
+def load_train_val_test(fraction: float = VAL_FRACTION) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """(train, validation, holdout). The RAG index still uses ALL of kb_train (train + validation)."""
+    kb, test = load_split()
+    train, val = split_train_val(kb, fraction)
+    return train, val, test
+
+
 def leakage_report(kb_train_df: pd.DataFrame, test_df: pd.DataFrame) -> dict[str, object]:
     """Proof for the judges that no holdout ticket can reach the index or the prompt."""
     kb_ids, test_ids = set(kb_train_df["ticket_id"]), set(test_df["ticket_id"])

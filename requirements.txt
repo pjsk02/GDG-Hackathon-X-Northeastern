@@ -1,0 +1,19 @@
+# SentinelDesk runtime + test dependencies (mirrors pyproject.toml [all]).
+# Preferred setup:  uv venv --python 3.12 && uv pip install -e ".[all]"
+# Plain pip:        python -m pip install -r requirements.txt
+fastapi>=0.163
+uvicorn>=0.54
+requests>=2.34
+pydantic>=2.14
+pydantic-settings>=2.16
+numpy>=2.5
+pandas>=2.2
+scikit-learn>=1.5
+joblib>=1.4
+google-genai>=3.4
+streamlit>=1.67
+matplotlib>=3.11
+pypdf>=7.1
+pytest>=9.2
+jsonschema>=4.26
+referencing>=0.37
