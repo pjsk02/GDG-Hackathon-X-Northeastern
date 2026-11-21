@@ -8,28 +8,70 @@
 </head>
 <body class="bg-[#0a0e16] text-slate-200 antialiased m-0 p-0 text-sm min-h-screen">
 
-<!-- ============ LOGIN ============ -->
+<!-- ============ AUTH (SIGN IN / SIGN UP) ============ -->
 <section id="v-login" class="min-h-screen flex items-center justify-center p-6 bg-[radial-gradient(#1e2330_1px,transparent_1px)] [background-size:20px_20px]">
-  <div class="w-full max-w-lg space-y-6">
+  <div class="w-full max-w-md space-y-6">
     <div class="text-center space-y-2">
       <div class="mx-auto w-11 h-11 rounded-xl bg-indigo-600/20 border border-indigo-500/40 flex items-center justify-center font-bold text-indigo-400">SD</div>
       <h1 class="text-2xl font-bold text-white">SentinelDesk</h1>
-      <p class="text-slate-400 text-xs">Choose your view (wired live to <span class="font-mono">POST /triage</span> &amp; <span class="font-mono">ticket_store</span>)</p>
+      <p class="text-slate-400 text-xs">Role-Based Access Control · Sign in or create an account</p>
     </div>
-    <div class="grid grid-cols-2 gap-4">
-      <button onclick="login('user')" class="text-left p-5 rounded-2xl bg-[#0f131c] border border-[#1e2330] hover:border-indigo-500 transition space-y-2">
-        <div class="text-2xl">🙋</div>
-        <div class="font-semibold text-white">I need help</div>
-        <div class="text-xs text-slate-400">Raise a ticket and track ongoing &amp; previous requests</div>
-        <div class="text-[11px] text-indigo-300 pt-1">Open User Portal →</div>
-      </button>
-      <button onclick="login('admin')" class="text-left p-5 rounded-2xl bg-[#0f131c] border border-[#1e2330] hover:border-indigo-500 transition space-y-2">
-        <div class="text-2xl">🛡️</div>
-        <div class="font-semibold text-white">Support team</div>
-        <div class="text-xs text-slate-400">See all tickets, criticality, similar past tickets &amp; outage groups</div>
-        <div class="text-[11px] text-indigo-300 pt-1">Open Admin Dashboard →</div>
-      </button>
+
+    <div class="rounded-2xl bg-[#0f131c] border border-[#1e2330] p-6 space-y-4 shadow-2xl">
+      <div class="grid grid-cols-2 p-0.5 rounded-lg bg-[#141822] border border-[#232936] text-xs">
+        <button id="auth-tab-in" onclick="setAuthMode('signin')" class="py-1.5 rounded-md font-semibold bg-indigo-600 text-white">Sign In</button>
+        <button id="auth-tab-up" onclick="setAuthMode('signup')" class="py-1.5 rounded-md font-semibold text-slate-400 hover:text-white">Sign Up</button>
+      </div>
+
+      <div id="auth-error" class="hidden text-xs px-3 py-2 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-300"></div>
+
+      <form onsubmit="submitAuth(event)" class="space-y-3 text-xs">
+        <div id="auth-name-wrap" class="hidden">
+          <label class="block text-[11px] uppercase tracking-wider text-slate-400 mb-1">Full Name</label>
+          <input id="auth-name" type="text" placeholder="Dr. Weber" class="w-full px-3 py-2.5 rounded-lg bg-[#141822] border border-[#232936] text-slate-100 focus:outline-none focus:border-indigo-500" />
+        </div>
+        <div>
+          <label class="block text-[11px] uppercase tracking-wider text-slate-400 mb-1">Email</label>
+          <input id="auth-email" type="email" required placeholder="you@hospital.org" class="w-full px-3 py-2.5 rounded-lg bg-[#141822] border border-[#232936] text-slate-100 focus:outline-none focus:border-indigo-500" />
+        </div>
+        <div>
+          <label class="block text-[11px] uppercase tracking-wider text-slate-400 mb-1">Password</label>
+          <input id="auth-password" type="password" required placeholder="••••••" class="w-full px-3 py-2.5 rounded-lg bg-[#141822] border border-[#232936] text-slate-100 focus:outline-none focus:border-indigo-500" />
+        </div>
+        <div id="auth-role-wrap" class="hidden">
+          <label class="block text-[11px] uppercase tracking-wider text-slate-400 mb-1">Account Role</label>
+          <div class="grid grid-cols-2 gap-2">
+            <button type="button" id="role-btn-user" onclick="setSignupRole('user')" class="p-2.5 rounded-lg border border-indigo-500 bg-indigo-500/10 text-left">
+              <div class="font-semibold text-white">🙋 User</div>
+              <div class="text-[10px] text-slate-400">Raise &amp; track tickets</div>
+            </button>
+            <button type="button" id="role-btn-admin" onclick="setSignupRole('admin')" class="p-2.5 rounded-lg border border-[#232936] bg-[#141822] text-left">
+              <div class="font-semibold text-white">🛡️ Admin</div>
+              <div class="text-[10px] text-slate-400">Full Ops &amp; Triage</div>
+            </button>
+          </div>
+        </div>
+        <button id="auth-submit" type="submit" class="w-full py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold">Sign In →</button>
+      </form>
+
+      <div class="pt-3 border-t border-[#1e2330] space-y-2">
+        <div class="text-[11px] text-slate-400 text-center">Quick Demo Access</div>
+        <div class="grid grid-cols-2 gap-2 text-xs">
+          <button onclick="demoSignIn('user@sentineldesk.local','user123')" class="py-2 px-3 rounded-lg bg-[#181c24] hover:bg-[#202530] border border-[#2a3040] text-slate-200">🙋 Demo User</button>
+          <button onclick="demoSignIn('admin@sentineldesk.local','admin123')" class="py-2 px-3 rounded-lg bg-[#181c24] hover:bg-[#202530] border border-[#2a3040] text-indigo-300">🛡️ Demo Admin</button>
+        </div>
+      </div>
     </div>
+  </div>
+</section>
+
+<!-- ============ 403 ACCESS DENIED ============ -->
+<section id="v-forbidden" class="hidden min-h-screen flex items-center justify-center p-6">
+  <div class="max-w-md w-full rounded-2xl bg-[#0f131c] border border-rose-500/40 p-6 text-center space-y-4">
+    <div class="text-3xl">🔒</div>
+    <h2 class="text-lg font-bold text-white">403 — Access Denied</h2>
+    <p class="text-xs text-slate-400">Your account has role <span class="font-mono text-rose-300">user</span>. Only <span class="font-mono text-indigo-300">admin</span> accounts can open the Support Ops Dashboard.</p>
+    <button onclick="openView('user')" class="px-4 py-2 rounded-lg bg-indigo-600 text-white text-xs font-semibold">Go to User Portal →</button>
   </div>
 </section>
 
@@ -42,8 +84,9 @@
         <div><div class="font-semibold text-white text-sm">SentinelDesk</div><div class="text-[10px] text-slate-400 -mt-0.5">CARE SUPPORT DESK</div></div>
       </div>
       <div class="flex items-center gap-3 text-xs">
-        <button onclick="login('admin')" class="px-2.5 py-1 rounded-lg bg-[#181c24] border border-[#2a3040] text-slate-300 hover:text-white">Switch to Admin</button>
-        <button onclick="show('login')" class="px-2.5 py-1 rounded-lg bg-[#181c24] border border-[#2a3040] text-slate-300 hover:text-white">Log out</button>
+        <span id="u-badge" class="px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 font-mono text-[11px]"></span>
+        <button id="u-to-admin" onclick="openView('admin')" class="hidden px-2.5 py-1 rounded-lg bg-[#181c24] border border-[#2a3040] text-indigo-300 hover:text-white">Admin Ops</button>
+        <button onclick="logout()" class="px-2.5 py-1 rounded-lg bg-[#181c24] border border-[#2a3040] text-slate-300 hover:text-white">Log out</button>
       </div>
     </div>
   </header>
@@ -57,7 +100,7 @@
       <input id="u-subject" placeholder="Subject (optional)" class="w-full px-3.5 py-2.5 rounded-lg bg-[#141822] border border-[#232936] text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500" />
       <textarea id="u-body" rows="3" placeholder="What's going wrong? e.g. VPN gateway refuses connections" class="w-full px-3.5 py-3 rounded-lg bg-[#141822] border border-[#232936] text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 resize-none"></textarea>
       <div class="flex flex-wrap gap-2 items-center justify-between">
-        <div class="text-[11px] text-slate-500">Customer view hides internal AI confidence, rules, and masked text.</div>
+        <div class="text-[11px] text-slate-500">Customer RBAC view hides internal AI confidence, rules, and masked text.</div>
         <button id="u-submit" onclick="submitTicket()" class="px-5 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold">Submit ticket →</button>
       </div>
       <div id="u-toast" class="hidden text-xs px-3 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-300"></div>
@@ -84,9 +127,10 @@
       <span class="font-semibold text-white">SentinelDesk</span><span class="text-xs text-indigo-400">Ops</span>
     </div>
     <div class="flex items-center gap-3 text-xs">
-      <button onclick="login('user')" class="px-2.5 py-1 rounded-lg bg-[#181c24] border border-[#2a3040] text-slate-300 hover:text-white">Switch to User</button>
+      <span id="a-badge" class="px-2 py-0.5 rounded-full bg-indigo-500/10 border border-indigo-500/30 text-indigo-300 font-mono text-[11px]"></span>
+      <button onclick="openView('user')" class="px-2.5 py-1 rounded-lg bg-[#181c24] border border-[#2a3040] text-slate-300 hover:text-white">User Portal</button>
       <button onclick="refreshAdmin()" class="px-2.5 py-1 rounded-lg bg-[#181c24] border border-[#2a3040] text-slate-300 hover:text-white">Refresh</button>
-      <button onclick="show('login')" class="px-2.5 py-1 rounded-lg bg-[#181c24] border border-[#2a3040] text-slate-300 hover:text-white">Log out</button>
+      <button onclick="logout()" class="px-2.5 py-1 rounded-lg bg-[#181c24] border border-[#2a3040] text-slate-300 hover:text-white">Log out</button>
     </div>
   </header>
 
@@ -113,6 +157,11 @@ const TIER = {
   AUTO_DRAFT:   { label:'AI reply ready',           short:'AI ready', dot:'bg-emerald-400', text:'text-emerald-400', pill:'bg-emerald-500/10 text-emerald-300 border-emerald-500/30', btn:'bg-emerald-600 hover:bg-emerald-500', rank:2 },
 };
 
+let authMode = 'signin';
+let signupRole = 'user';
+let authToken = localStorage.getItem('sd_token') || '';
+let currentUser = JSON.parse(localStorage.getItem('sd_user') || 'null');
+
 let userTickets = [];
 let adminTickets = [];
 let outageAlert = { active: false };
@@ -130,17 +179,122 @@ function fmtAgo(ts) {
   return Math.floor(s/3600) + 'h ago';
 }
 function show(v) {
-  ['login','user','admin'].forEach(k => document.getElementById('v-'+k).classList.toggle('hidden', k !== v));
+  ['login','forbidden','user','admin'].forEach(k => document.getElementById('v-'+k).classList.toggle('hidden', k !== v));
 }
-async function login(role) {
-  show(role);
-  if (role === 'user') await refreshUser();
-  else await refreshAdmin();
+function authHeaders(extra = {}) {
+  return authToken ? { ...extra, 'Authorization': 'Bearer ' + authToken } : extra;
+}
+
+// ---------- AUTH / RBAC ----------
+function setAuthMode(mode) {
+  authMode = mode;
+  document.getElementById('auth-error').classList.add('hidden');
+  document.getElementById('auth-name-wrap').classList.toggle('hidden', mode !== 'signup');
+  document.getElementById('auth-role-wrap').classList.toggle('hidden', mode !== 'signup');
+  document.getElementById('auth-submit').textContent = mode === 'signup' ? 'Create Account →' : 'Sign In →';
+  document.getElementById('auth-tab-in').className = 'py-1.5 rounded-md font-semibold ' + (mode==='signin' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white');
+  document.getElementById('auth-tab-up').className = 'py-1.5 rounded-md font-semibold ' + (mode==='signup' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white');
+}
+function setSignupRole(r) {
+  signupRole = r;
+  document.getElementById('role-btn-user').className = 'p-2.5 rounded-lg border text-left ' + (r==='user' ? 'border-indigo-500 bg-indigo-500/10' : 'border-[#232936] bg-[#141822]');
+  document.getElementById('role-btn-admin').className = 'p-2.5 rounded-lg border text-left ' + (r==='admin' ? 'border-indigo-500 bg-indigo-500/10' : 'border-[#232936] bg-[#141822]');
+}
+async function submitAuth(e) {
+  e.preventDefault();
+  const errEl = document.getElementById('auth-error');
+  const btn = document.getElementById('auth-submit');
+  errEl.classList.add('hidden');
+  const email = document.getElementById('auth-email').value.trim();
+  const password = document.getElementById('auth-password').value;
+  const name = document.getElementById('auth-name').value.trim();
+  const url = authMode === 'signup' ? '/auth/signup' : '/auth/signin';
+  const payload = authMode === 'signup' ? { name, email, password, role: signupRole } : { email, password };
+
+  btn.disabled = true;
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const detail = Array.isArray(data.detail) ? data.detail.map(d => d.msg).join(', ') : data.detail;
+      errEl.textContent = detail || 'Authentication failed';
+      errEl.classList.remove('hidden');
+      return;
+    }
+    saveSession(data.token, data.user);
+    openView(data.user.role === 'admin' ? 'admin' : 'user');
+  } catch (err) {
+    errEl.textContent = 'Network error — please try again.';
+    errEl.classList.remove('hidden');
+  } finally {
+    btn.disabled = false;
+  }
+}
+async function demoSignIn(email, password) {
+  const errEl = document.getElementById('auth-error');
+  errEl.classList.add('hidden');
+  try {
+    const res = await fetch('/auth/signin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      errEl.textContent = data.detail || 'Demo sign-in failed';
+      errEl.classList.remove('hidden');
+      return;
+    }
+    saveSession(data.token, data.user);
+    openView(data.user.role === 'admin' ? 'admin' : 'user');
+  } catch (err) {
+    errEl.textContent = 'Network error — please try again.';
+    errEl.classList.remove('hidden');
+  }
+}
+function saveSession(token, user) {
+  authToken = token;
+  currentUser = user;
+  localStorage.setItem('sd_token', token);
+  localStorage.setItem('sd_user', JSON.stringify(user));
+  localStorage.setItem('sd_last_email', user.email);
+}
+function logout() {
+  const lastEmail = (currentUser && currentUser.email) || localStorage.getItem('sd_last_email') || '';
+  authToken = '';
+  currentUser = null;
+  localStorage.removeItem('sd_token');
+  localStorage.removeItem('sd_user');
+  setAuthMode('signin');
+  document.getElementById('auth-email').value = lastEmail;
+  document.getElementById('auth-password').value = '';
+  show('login');
+}
+async function openView(view) {
+  if (!currentUser || !authToken) { show('login'); return; }
+  if (view === 'admin' && currentUser.role !== 'admin') {
+    show('forbidden');
+    return;
+  }
+  show(view);
+  if (view === 'user') {
+    document.getElementById('u-badge').textContent = `${currentUser.name} · ${currentUser.role.toUpperCase()}`;
+    document.getElementById('u-to-admin').classList.toggle('hidden', currentUser.role !== 'admin');
+    await refreshUser();
+  } else {
+    document.getElementById('a-badge').textContent = `${currentUser.name} · ADMIN`;
+    await refreshAdmin();
+  }
 }
 
 // ---------- USER API ----------
 async function refreshUser() {
-  const res = await fetch('/tickets', { headers: { 'X-Role': 'customer' } });
+  const res = await fetch('/tickets', { headers: authHeaders() });
+  if (res.status === 401) { logout(); return; }
   userTickets = await res.json();
   renderUser();
 }
@@ -154,14 +308,15 @@ async function submitTicket() {
   try {
     const res = await fetch('/triage', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Role': 'customer' },
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ subject, body })
     });
+    if (res.status === 401) { logout(); return; }
     const data = await res.json();
     document.getElementById('u-subject').value = '';
     document.getElementById('u-body').value = '';
     const toast = document.getElementById('u-toast');
-    toast.textContent = `Ticket ${data.ticket_id} submitted (${data.status}).`;
+    toast.textContent = `Ticket ${data.ticket_id} submitted (${data.status || 'Received'}).`;
     toast.classList.remove('hidden');
     userTab = data.status === 'Replied' ? 'previous' : 'ongoing';
     await refreshUser();
@@ -186,7 +341,7 @@ function renderUser() {
     return;
   }
   document.getElementById('u-list').innerHTML = list.map(t => {
-    const title = esc(t.subject || t.body.slice(0, 60));
+    const title = esc(t.subject || (t.body || '').slice(0, 60));
     const head = `<div class="flex items-center justify-between gap-2"><div class="flex items-center gap-2 min-w-0"><span class="font-mono text-[11px] px-2 py-0.5 rounded bg-[#181c24] border border-[#232936] text-slate-300">${esc(t.ticket_id)}</span><span class="font-semibold text-white truncate">${title}</span></div><span class="text-[11px] text-slate-500 shrink-0">${fmtAgo(t.created_at)}</span></div>`;
     if (t.status === 'Replied') {
       return `<div class="rounded-xl bg-[#0f131c] border border-[#1e2330] p-4 space-y-3">${head}
@@ -210,9 +365,11 @@ function renderUser() {
 // ---------- ADMIN API ----------
 async function refreshAdmin() {
   const [tRes, oRes] = await Promise.all([
-    fetch('/tickets', { headers: { 'X-Role': 'agent' } }),
-    fetch('/outage')
+    fetch('/tickets', { headers: authHeaders() }),
+    fetch('/outage', { headers: authHeaders() })
   ]);
+  if (tRes.status === 401 || oRes.status === 401) { logout(); return; }
+  if (tRes.status === 403 || oRes.status === 403) { show('forbidden'); return; }
   adminTickets = await tRes.json();
   outageAlert = await oRes.json();
   if (!selected && adminTickets.length) selected = adminTickets[0].ticket_id;
@@ -220,11 +377,12 @@ async function refreshAdmin() {
 }
 
 async function resolveTicket(id, targetStatus) {
-  await fetch(`/tickets/${encodeURIComponent(id)}/action`, {
+  const res = await fetch(`/tickets/${encodeURIComponent(id)}/action`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ status: targetStatus })
   });
+  if (res.status === 403) { show('forbidden'); return; }
   await refreshAdmin();
 }
 
@@ -273,11 +431,11 @@ function renderAdmin() {
       <div class="text-xs truncate mt-1 ${on?'text-slate-100':'text-slate-300'}">${title}</div>
       <div class="text-[10px] text-slate-500 mt-0.5">${esc(t.source)} · ${fmtAgo(t.created_at)}</div>
     </div>`;
-  }).join('') || '<div class="text-xs text-slate-500 p-3">No tickets yet. Switch to User Portal to raise one!</div>';
+  }).join('') || '<div class="text-xs text-slate-500 p-3">No tickets yet.</div>';
 
   const t = adminTickets.find(x => x.ticket_id === selected) || list[0];
   if (!t) {
-    document.getElementById('a-detail').innerHTML = '<div class="text-xs text-slate-400">Select a ticket on the left or submit one from the User Portal.</div>';
+    document.getElementById('a-detail').innerHTML = '<div class="text-xs text-slate-400">Select a ticket on the left.</div>';
     return;
   }
   const r = t.result || {};
@@ -334,9 +492,12 @@ function renderAdmin() {
   `;
 }
 
-// Auto-route if opened at /user or /admin
-if (location.pathname === '/user') login('user');
-else if (location.pathname === '/admin') login('admin');
+// Restore session on load
+if (currentUser && authToken) {
+  if (location.pathname === '/admin') openView('admin');
+  else if (location.pathname === '/user') openView('user');
+  else openView(currentUser.role === 'admin' ? 'admin' : 'user');
+}
 </script>
 </body>
 </html>
