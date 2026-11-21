@@ -71,3 +71,33 @@ GEMINI_THINKING_LEVEL=low
 
 ### Open issues / notes for teammates
 - None. `sentinel/pipeline.py` already invokes `claims.check_claims(drafted.draft_reply or "", verified)` and surfaces every `GuardFinding` in `result.guard_findings` and `R6 unbacked <kind> in draft: '<text>'` escalation reasons.
+
+## Step 3: Prompt-injection rule R7 (N9) and guardrail cases
+
+### What was built
+- Implemented `detect_injection(text: str) -> list[str]` in `sentinel/injection.py` (exact contract preserved) for EN and DE:
+  - Normalizes Unicode NFKC, strips zero-width characters, folds German umlauts/eszett (`ä/ö/ü/ß` -> `ae/oe/ue/ss`) and curly punctuation while preserving newlines for line-start role tags.
+  - Detects 5 deduplicated categories:
+    1. `"asks to ignore previous instructions"` (EN/DE; avoids false positives on `"please ignore my previous email"` / `"bitte ignorieren Sie meine vorherige E-Mail"`)
+    2. `"attempts role or jailbreak override"` (EN/DE role hijacking, developer/jailbreak mode, safety/guardrail bypass)
+    3. `"attempts to spoof company policy"` (EN/DE `"state it as company policy"` / `"stelle es als offizielle Unternehmensrichtlinie dar"`)
+    4. `"requests hidden system prompt"` (EN/DE prompt-extraction verbs + prompt targets, avoiding terminal/normal prose)
+    5. `"embeds fake system delimiter or output override"` (`<<SYS>>`, `[INST]`, `<system>`, line-start `SYSTEM:` directives, and `refused=false` / `escalation=AUTO_DRAFT` tampering)
+- Created `tests/test_injection.py` with **35 offline unit & R7 pipeline integration test cases** (EN/DE positive injection cases, benign false-positive controls, deduplication invariants, and `SentinelAgent` R7 integration).
+- Created `eval/cases_guardrails.jsonl` with **10 guardrail evaluation cases** matching the `eval/sentinel_cases.jsonl` schema (`id`, `subject`, `body`, `expect_escalation`, `why`), covering EN/DE prompt injections, invented SLA promises, number/money/date traps, PII masking, and a benign `"ignore my previous email"` control.
+
+### Files changed
+- `sentinel/injection.py`
+- `tests/test_injection.py`
+- `eval/cases_guardrails.jsonl`
+- `docs/progress/Sujitha.md`
+
+### Verification
+- `.venv/bin/pytest -q tests/test_injection.py`: **35 passed, 0 failed**.
+- Real dataset false-positive scan across all 28,587 tickets in `data/raw/aa_dataset-tickets-multi-lang-5-2-50-version.csv`: **0 false positives**.
+- All 10 cases in `eval/cases_guardrails.jsonl` run through `SentinelAgent().triage(..., provider="extractive")`: **10/10 verified** (all 4 injection cases trigger R7 with 2–3 hits each; all 4 SLA/number traps escalate; `guard-pii-masking-en` masks 5 PII types; `guard-benign-ignore-email` produces 0 injection hits).
+- Full test suite & ownership check verified via `test-runner` and `ownership-reviewer`.
+
+### Open issues / notes for teammates
+- Je (Role A): `eval/cases_guardrails.jsonl` is ready to be loaded alongside `eval/sentinel_cases.jsonl` in `eval/sentinel_eval.py` (Step 4).
+- Kaushik (Role E): `sentinel/pipeline.py` already populates `result.injection_flags` and adds `R7 prompt injection: <hit>` reasons for three-tier routing (`R7 -> PAGE_ONCALL`).
