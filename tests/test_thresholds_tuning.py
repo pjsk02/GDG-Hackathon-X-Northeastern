@@ -27,6 +27,7 @@ def _signals(n: int = 200, seed: int = 0) -> pd.DataFrame:
         "top_similarity": rng.uniform(0.2, 0.9, n),
         "r5": rng.random(n) < 0.05,
         "is_hpi": rng.random(n) < 0.2,
+        "triage_correct": rng.random(n) < 0.55,
     })
 
 
@@ -133,3 +134,36 @@ def test_written_json_is_what_thresholds_load_returns(tmp_path, monkeypatch):
     monkeypatch.setattr(thresholds, "THRESHOLDS_PATH", path)
     loaded = thresholds.load(Settings())
     assert loaded == {k: pytest.approx(float(chosen[k])) for k in tt.KEYS}
+
+
+def test_fine_p_high_grid_around_the_target():
+    grid = tt.DEFAULT_GRID["high_priority_alert_probability"]
+    assert {0.21, 0.22, 0.23, 0.24} <= set(grid)
+    assert min(grid) == 0.10 and max(grid) == 0.70
+
+
+def test_mistriage_metrics_are_reported():
+    sig = _signals()
+    strict = tt.evaluate_point(sig, 0.8, 0.5, 0.6)
+    loose = tt.evaluate_point(sig, 0.3, 0.5, 0.0)
+    assert 0.0 <= loose["mistriage_caught"] <= strict["mistriage_caught"] <= 1.0
+    assert "auto_triage_accuracy" in strict
+    assert "mistriage_caught" not in tt.evaluate_point(sig.drop(columns="triage_correct"), 0.5, 0.5, 0.5)
+
+
+def test_tie_break_keeps_review_safeguard_then_most_auto():
+    pts = pd.DataFrame([
+        # same on-call rate and recall; conf/sim only move tickets between review and auto
+        {"triage_confidence_min": 0.3, "hpi_recall": 0.91, "oncall_rate": 0.60, "auto_rate": 0.40,
+         "escalation_rate": 0.60, "mistriage_caught": 0.65},
+        {"triage_confidence_min": 0.55, "hpi_recall": 0.91, "oncall_rate": 0.60, "auto_rate": 0.27,
+         "escalation_rate": 0.73, "mistriage_caught": 0.81},
+        {"triage_confidence_min": 0.7, "hpi_recall": 0.91, "oncall_rate": 0.60, "auto_rate": 0.13,
+         "escalation_rate": 0.87, "mistriage_caught": 0.93},
+        {"triage_confidence_min": 0.3, "hpi_recall": 0.95, "oncall_rate": 0.70, "auto_rate": 0.30,
+         "escalation_rate": 0.70, "mistriage_caught": 0.90},
+    ])
+    best, met = tt.choose(pts, 0.90, 0.80)
+    assert met and best["oncall_rate"] == 0.60 and best["triage_confidence_min"] == 0.55
+    best, _ = tt.choose(pts, 0.90, 0.99)  # nobody reaches the floor: most mistriage caught at the lowest on-call
+    assert best["triage_confidence_min"] == 0.7

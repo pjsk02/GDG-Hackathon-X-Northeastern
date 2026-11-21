@@ -48,15 +48,22 @@ def as_point(row: dict) -> dict:
     return {k: round(float(row[k]), 4) for k in POINT_KEYS}
 
 
-def frontier(points: pd.DataFrame, max_points: int = MAX_POINTS) -> pd.DataFrame:
-    """Pareto frontier on (low oncall_rate, high hpi_recall), lenient -> strict; thinned to max_points."""
-    ranked = points.sort_values(["oncall_rate", "hpi_recall", "escalation_rate"], ascending=[True, False, True])
-    keep, best = [], -1.0
-    for idx, row in ranked.iterrows():
-        if row["hpi_recall"] > best:
-            keep.append(idx)
-            best = row["hpi_recall"]
-    front = ranked.loc[keep].reset_index(drop=True)
+def frontier(points: pd.DataFrame, max_points: int = MAX_POINTS,
+             mistriage_min: float = tt.MISTRIAGE_CATCH) -> pd.DataFrame:
+    """Pareto frontier on (low oncall_rate, high hpi_recall), lenient -> strict; thinned to max_points.
+
+    Several threshold settings can share one (oncall_rate, hpi_recall) position; the representative is picked with
+    the same tie-break as `make tune` (tt.pick_among: keep the R3/R4 review safeguard, then most auto-drafts).
+    """
+    pairs = (points[["oncall_rate", "hpi_recall"]].drop_duplicates()
+             .sort_values(["oncall_rate", "hpi_recall"], ascending=[True, False]))
+    reps, best = [], -1.0
+    for oncall, recall in pairs.itertuples(index=False):
+        if recall > best:
+            same = points[(points["oncall_rate"] == oncall) & (points["hpi_recall"] == recall)]
+            reps.append(tt.pick_among(same, mistriage_min))
+            best = recall
+    front = pd.DataFrame(reps).reset_index(drop=True)
     if len(front) > max_points:  # keep both ends, thin the middle evenly
         step = (len(front) - 1) / (max_points - 1)
         front = front.iloc[sorted({round(i * step) for i in range(max_points)})].reset_index(drop=True)

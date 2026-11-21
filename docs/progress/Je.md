@@ -249,3 +249,37 @@ Two misses, both expected with today's stubs, not code bugs:
 - Team: the demo needs Kaushik's pages (board, customer, queue, manager), Rithwik's Gemini index and simulator, and
   Sujitha's guard and injection detector. The "Expected tier" column uses the PRD three-tier mapping.
 - Step 6: replace every `_TBD_` in the README metrics table with values from `data/eval/latest/report.json`.
+
+## Step 6 (in progress) - integration status and tuning refinement (2026-11-21)
+
+### Integration status (read-only checks; nothing merged)
+
+- No pull requests are open on GitHub yet, and `gh` is not installed locally. Merging happens on GitHub by Je.
+- Kaushik-Branch (6 steps, 16 files) and Shishir-Branch (step 1, docs only) touch only their owners' files.
+- Trial merge of main + Kaushik + Shishir + Je in a throwaway worktree: no conflicts, **107 tests pass**.
+- Rithwik-Branch and Sujitha-Branch: nothing pushed yet. `GEMINI_API_KEY` not set, so the Gemini index and eval wait.
+- Shishir's request file is addressed to Kaushik (R2 reason wording), nothing for Je.
+
+### Tuning refinement (`eval/tune_thresholds.py`, `eval/safety_dial.py`)
+
+Under Kaushik's real `decide_tier` only R1/R2 (and R5/R7) page on-call, so:
+1. `high_priority_alert_probability` is the only recall lever. Its grid is now 0.01 steps from 0.10 to 0.40 (plus
+   0.45-0.70); 4,884 points, swept in under a second (lookup-table tier mapping).
+2. `triage_confidence_min` / `retrieval_similarity_min` only move tickets between agent review and auto-draft. The
+   old tie-break (lowest escalation rate) would have set them to their minimum and switched R3/R4 off. New
+   tie-break among the lowest-on-call points: at least `--mistriage-catch` (default 0.80) of mistriaged
+   validation tickets (wrong type or priority, 47% of validation) must reach a human; then the most auto-drafts.
+   New metrics per point: `mistriage_caught`, `auto_triage_accuracy`. The dial frontier uses the same tie-break.
+
+Preview with Kaushik's mapping (cached validation signals; not written to `data/`):
+
+| | conf_min | p_high_alert | sim_min | HPI recall | on-call | review | auto | mistriage caught |
+|---|---|---|---|---|---|---|---|---|
+| settings defaults | 0.55 | 0.50 | 0.55 | 0.726 | 0.346 | 0.303 | 0.351 | 0.714 |
+| old coarse grid | 0.30 | 0.20 | 0.00 | 0.919 | 0.654 | 0.000 | 0.346 | - |
+| **refined** | **0.55** | **0.22** | **0.58** | **0.911** | **0.625** | 0.110 | 0.265 | **0.801** |
+
+On Je-Branch today (placeholder `decide_tier`, every escalation is on-call) `make tune` picks 0.40 / 0.24 / 0.50:
+recall 0.901 at 0.610 on-call (was 0.614). Re-run `make tune && make dial` on merged main for the real values.
+
+Verified: `pytest -q` 82 passed (3 new tuning tests); `make tune` and `make dial` exit 0.

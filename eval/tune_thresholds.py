@@ -13,8 +13,11 @@ What it does
        Each ticket's fired rules (R1-R5) go through escalation.decide_tier, so the tiers follow owner E's
        mapping as soon as it is merged (until then every escalation counts as on-call).
     5. Objective: high-priority-incident (HPI) recall >= --target-recall (0.90) with the lowest on-call
-       rate. Ties: higher recall, then lower escalation rate. If no point reaches the target, the
-       highest-recall point is chosen and the JSON says so.
+       rate. Among the points with that on-call rate (only R1/R2 page on-call, so triage_confidence_min and
+       retrieval_similarity_min only move tickets between agent review and auto-draft), keep the R3/R4
+       review safeguards: at least --mistriage-catch (0.80) of the mistriaged validation tickets (wrong
+       type or priority) must reach a human, and among those the most auto-drafts win. If no point reaches
+       the recall target, the highest-recall point is chosen and the JSON says so.
     6. Writes data/sentinel/thresholds.json (the three keys sentinel.thresholds.load reads, plus the
        validation metrics) and prints a table.
 
@@ -27,7 +30,8 @@ Reusable API (eval/safety_dial.py builds on it):
     evaluate_point(signals, triage_confidence_min, high_priority_alert_probability,
                    retrieval_similarity_min) -> dict           rates + hpi_recall
     sweep(signals, grid) -> pd.DataFrame
-    choose(points, target_recall) -> (dict, bool)              chosen point, target_met
+    choose(points, target_recall, mistriage_min) -> (dict, bool)   chosen point, target_met
+    pick_among(candidates, mistriage_min) -> pd.Series            tie-break among equal on-call/recall points
 """
 
 from __future__ import annotations
@@ -48,10 +52,13 @@ from sentinel import dataset, escalation, thresholds
 KEYS = thresholds.KEYS  # ("triage_confidence_min", "retrieval_similarity_min", "high_priority_alert_probability")
 RULES = ("R1", "R2", "R3", "R4", "R5")
 TARGET_RECALL = 0.90
+MISTRIAGE_CATCH = 0.80  # share of wrongly triaged tickets that must reach a human (any non-auto tier)
 
 DEFAULT_GRID: dict[str, list[float]] = {
     "triage_confidence_min": [round(x, 2) for x in np.arange(0.30, 0.801, 0.05)],
-    "high_priority_alert_probability": [round(x, 2) for x in np.arange(0.20, 0.701, 0.05)],
+    # P(high) is the main recall lever (R2 pages on-call), so it gets a fine 0.01 grid where the 0.90 target sits
+    "high_priority_alert_probability": sorted({round(x, 2) for x in np.arange(0.10, 0.401, 0.01)}
+                                              | {round(x, 2) for x in np.arange(0.45, 0.701, 0.05)}),
     # retrieval values are completed from the observed similarity quantiles (embedder-dependent scale)
     "retrieval_similarity_min": [0.0, 0.3, 0.4, 0.45, 0.5, 0.55, 0.6],
 }
@@ -117,6 +124,8 @@ def compute_signals(model, store, val_df: pd.DataFrame) -> pd.DataFrame:
         "r5": [bool(escalation.commitment_requests(t)) for t in texts],
         # labels are read only to score; never fed to the gate
         "is_hpi": ((val_df["type"].astype(str) == "Incident") & (val_df["priority"].astype(str) == "high")).to_numpy(),
+        "triage_correct": (np.array([p.type.label for p in preds]) == val_df["type"].astype(str).to_numpy())
+                          & (np.array([p.priority.label for p in preds]) == val_df["priority"].astype(str).to_numpy()),
     })
 
 
@@ -150,8 +159,9 @@ def tiers(signals: pd.DataFrame, **th: float) -> np.ndarray:
     mask = np.zeros(len(signals), dtype=np.int64)
     for bit, rule in enumerate(RULES):
         mask |= fired[rule].astype(np.int64) << bit
-    by_mask = {m: tier_for(tuple(r for b, r in enumerate(RULES) if m >> b & 1)) for m in np.unique(mask)}
-    return np.array([by_mask[m] for m in mask], dtype=object)
+    lut = np.array([tier_for(tuple(r for b, r in enumerate(RULES) if m >> b & 1)) for m in range(1 << len(RULES))],
+                   dtype=object)
+    return lut[mask]
 
 
 def evaluate_point(signals: pd.DataFrame, triage_confidence_min: float, high_priority_alert_probability: float,
@@ -176,6 +186,18 @@ def evaluate_point(signals: pd.DataFrame, triage_confidence_min: float, high_pri
         "hpi_escalated_recall": round(float((~auto & hpi).sum()) / max(int(hpi.sum()), 1), 4),
         "hpi_count": int(hpi.sum()),
         "tickets": int(len(t)),
+        **_mistriage_metrics(signals, auto),
+    }
+
+
+def _mistriage_metrics(signals: pd.DataFrame, auto: np.ndarray) -> dict[str, float]:
+    """How well R3/R4 route wrongly triaged tickets to a human (needs the triage_correct column)."""
+    if "triage_correct" not in signals:
+        return {}
+    ok = signals["triage_correct"].to_numpy(dtype=bool)
+    return {
+        "mistriage_caught": round(float((~auto & ~ok).sum()) / max(int((~ok).sum()), 1), 4),
+        "auto_triage_accuracy": round(float((auto & ok).sum()) / max(int(auto.sum()), 1), 4),
     }
 
 
@@ -197,18 +219,32 @@ def sweep(signals: pd.DataFrame, grid: dict[str, list[float]]) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def choose(points: pd.DataFrame, target_recall: float = TARGET_RECALL) -> tuple[dict, bool]:
-    """Lowest on-call rate with HPI recall >= target; else the highest-recall point."""
-    def clean(row: pd.Series) -> dict:
-        return {k: int(v) if k in ("hpi_count", "tickets") else float(v) for k, v in row.to_dict().items()}
+def pick_among(cands: pd.DataFrame, mistriage_min: float = MISTRIAGE_CATCH) -> pd.Series:
+    """Tie-break among points with the same on-call rate: keep >= mistriage_min of mistriaged tickets in front of
+    a human, then the most auto-drafts. Without mistriage data: higher recall, then lower escalation rate."""
+    if "mistriage_caught" in cands and cands["mistriage_caught"].notna().all():
+        safe = cands[cands["mistriage_caught"] >= mistriage_min]
+        if len(safe):
+            return safe.sort_values(["auto_rate", "hpi_recall", "mistriage_caught"],
+                                    ascending=[False, False, False]).iloc[0]
+        return cands.sort_values(["mistriage_caught", "auto_rate"], ascending=[False, False]).iloc[0]
+    return cands.sort_values(["hpi_recall", "escalation_rate"], ascending=[False, True]).iloc[0]
 
+
+def _clean(row: pd.Series) -> dict:
+    return {k: int(v) if k in ("hpi_count", "tickets") else float(v) for k, v in row.to_dict().items()}
+
+
+def choose(points: pd.DataFrame, target_recall: float = TARGET_RECALL,
+           mistriage_min: float = MISTRIAGE_CATCH) -> tuple[dict, bool]:
+    """Lowest on-call rate with HPI recall >= target (tie-break: pick_among); else the highest-recall point."""
     feasible = points[points["hpi_recall"] >= target_recall]
     if len(feasible):
-        best = feasible.sort_values(["oncall_rate", "hpi_recall", "escalation_rate"],
-                                    ascending=[True, False, True]).iloc[0]
-        return clean(best), True
-    best = points.sort_values(["hpi_recall", "oncall_rate"], ascending=[False, True]).iloc[0]
-    return clean(best), False
+        lowest = feasible[feasible["oncall_rate"] <= feasible["oncall_rate"].min() + 1e-9]
+        return _clean(pick_among(lowest, mistriage_min)), True
+    top = points[points["hpi_recall"] >= points["hpi_recall"].max() - 1e-9]
+    top = top[top["oncall_rate"] <= top["oncall_rate"].min() + 1e-9]
+    return _clean(pick_among(top, mistriage_min)), False
 
 
 # --- CLI ---------------------------------------------------------------------------------------
@@ -236,15 +272,15 @@ def _open_store():
 
 def print_table(points: pd.DataFrame, chosen: dict, baseline: dict, top: int = 12) -> None:
     cols = ["triage_confidence_min", "high_priority_alert_probability", "retrieval_similarity_min",
-            "hpi_recall", "oncall_rate", "review_rate", "auto_rate", "escalation_rate"]
-    head = ["conf_min", "p_high_alert", "sim_min", "hpi_recall", "oncall", "review", "auto", "escalate"]
-    fmt = "  {:>8} {:>12} {:>8} {:>10} {:>7} {:>7} {:>7} {:>8}"
+            "hpi_recall", "oncall_rate", "review_rate", "auto_rate", "mistriage_caught"]
+    head = ["conf_min", "p_high_alert", "sim_min", "hpi_recall", "oncall", "review", "auto", "mistriage"]
+    fmt = "  {:>8} {:>12} {:>8} {:>10} {:>7} {:>7} {:>7} {:>9}"
     print(fmt.format(*head))
 
     def line(p, tag=""):
-        print(fmt.format(*[f"{p[c]:.3f}" if isinstance(p[c], float) else p[c] for c in cols]) + tag)
+        print(fmt.format(*[f"{float(p[c]):.3f}" if c in p else "-" for c in cols]) + tag)
 
-    ranked = points.sort_values(["oncall_rate", "hpi_recall"], ascending=[True, False])
+    ranked = points.sort_values(["oncall_rate", "hpi_recall", "auto_rate"], ascending=[True, False, False])
     shown = ranked[ranked["hpi_recall"] >= TARGET_RECALL].head(top)
     for _, p in shown.iterrows():
         line(p)
@@ -257,6 +293,8 @@ def main(argv: Iterable[str] | None = None) -> dict:
     ap = argparse.ArgumentParser(description="Tune gate thresholds on the validation slice.")
     ap.add_argument("--model", default=None, help="load a TRAIN-ONLY TriageModel joblib instead of fitting one")
     ap.add_argument("--target-recall", type=float, default=TARGET_RECALL)
+    ap.add_argument("--mistriage-catch", type=float, default=MISTRIAGE_CATCH,
+                    help="share of mistriaged validation tickets that must reach a human (R3/R4 review)")
     ap.add_argument("--out", default=str(thresholds.THRESHOLDS_PATH))
     args = ap.parse_args(list(argv) if argv is not None else None)
 
@@ -270,7 +308,7 @@ def main(argv: Iterable[str] | None = None) -> dict:
 
     grid = build_grid(signals)
     points = sweep(signals, grid)
-    chosen, met = choose(points, args.target_recall)
+    chosen, met = choose(points, args.target_recall, args.mistriage_catch)
 
     from shared.settings import Settings
     d = Settings()
@@ -286,7 +324,8 @@ def main(argv: Iterable[str] | None = None) -> dict:
         **{k: float(chosen[k]) for k in KEYS},
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "split": "validation",
-        "objective": f"min oncall_rate s.t. hpi_recall >= {args.target_recall}",
+        "objective": f"min oncall_rate s.t. hpi_recall >= {args.target_recall}; then max auto_rate "
+                     f"s.t. mistriage_caught >= {args.mistriage_catch}",
         "target_met": bool(met),
         "validation": {k: chosen[k] for k in chosen if k not in KEYS},
         "baseline_defaults": baseline,
