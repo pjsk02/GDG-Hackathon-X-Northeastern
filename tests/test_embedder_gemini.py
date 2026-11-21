@@ -151,3 +151,48 @@ def test_get_embedder_gemini_without_key_is_a_clear_error():
 
 def test_default_provider_is_still_hash():
     assert isinstance(get_embedder(Settings(_env_file=None)), HashEmbedder)
+
+
+# --- Vertex AI switch (docs/requests/Je.md): same environment variable as agent/llm_router.py -----------------
+
+
+class RecordingClient:
+    calls: list[dict] = []
+
+    def __init__(self, **kwargs):
+        RecordingClient.calls.append(kwargs)
+        self.models = FakeModels()
+
+
+@pytest.fixture
+def recording_client(monkeypatch):
+    from google import genai
+
+    RecordingClient.calls = []
+    monkeypatch.setattr(genai, "Client", RecordingClient)
+    return RecordingClient
+
+
+@pytest.mark.parametrize("flag", ["true", "TRUE", " True "])
+def test_vertex_skips_the_key_and_uses_adc(monkeypatch, recording_client, flag):
+    monkeypatch.setenv("GOOGLE_GENAI_USE_VERTEXAI", flag)
+    emb = get_embedder(Settings(_env_file=None, embed_provider="gemini", gemini_api_key=None))
+    assert emb.embed(["a"]).shape == (1, 4)
+    assert "api_key" not in recording_client.calls[0]
+    assert recording_client.calls[0]["http_options"].timeout == 30_000
+
+
+def test_vertex_ignores_a_key_that_is_present(monkeypatch, recording_client):
+    monkeypatch.setenv("GOOGLE_GENAI_USE_VERTEXAI", "true")
+    get_embedder(Settings(_env_file=None, embed_provider="gemini", gemini_api_key="test-key")).embed(["a"])
+    assert "api_key" not in recording_client.calls[0]
+
+
+@pytest.mark.parametrize("flag", [None, "false", ""])
+def test_ai_studio_passes_the_key(monkeypatch, recording_client, flag):
+    if flag is None:
+        monkeypatch.delenv("GOOGLE_GENAI_USE_VERTEXAI", raising=False)
+    else:
+        monkeypatch.setenv("GOOGLE_GENAI_USE_VERTEXAI", flag)
+    get_embedder(Settings(_env_file=None, embed_provider="gemini", gemini_api_key="test-key")).embed(["a"])
+    assert recording_client.calls[0]["api_key"] == "test-key"

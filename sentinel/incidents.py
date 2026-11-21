@@ -9,8 +9,8 @@ Owner: C (Rithwik). Pure function, template only (no LLM), English and German.
     incident.status_update                                     # in the burst's majority language
     incident.status_updates["en"], incident.status_updates["de"]
 
-Linked tickets: the alert's `ticket_ids` when the tracker was given ids (the smart queue does), otherwise the tickets
-whose subject matches one of the alert's subjects. The shared precedent is the past ticket the burst retrieved most
+Linked tickets: the alert's `ticket_ids` when the tracker was given ids (`observe(result, ticket_id=...)`), otherwise
+the newest stored ticket for each of the alert's subjects (so a repeated demo burst does not pull in the old one). The shared precedent is the past ticket the burst retrieved most
 often (alert.shared_precedents first, then frequency, then similarity). The status text quotes that precedent's
 resolution only when the quote is written in the update's language (checked on the text: some dataset answers are
 in the other language) and has clean sentences (no placeholders, questions or greetings); otherwise it names the
@@ -156,8 +156,16 @@ def _linked_tickets(alert: OutageAlert, tickets: list[TicketRecord]) -> list[Tic
         wanted = set(alert.ticket_ids)
         linked = [t for t in tickets if t.ticket_id in wanted]
     else:
-        subjects = set(alert.subjects)
-        linked = [t for t in tickets if (t.subject or t.body)[:80] in subjects]
+        # No ids (the tracker was fed results only): for each alert subject take the NEWEST stored ticket with that
+        # subject, as many as the alert saw. Older tickets with the same subject (an earlier demo burst) stay out.
+        wanted_counts = Counter(alert.subjects)
+        newest_first = sorted(tickets, key=lambda t: (t.created_at, t.ticket_id), reverse=True)
+        linked = []
+        for t in newest_first:
+            key = (t.subject or t.body)[:80]
+            if wanted_counts[key] > 0:
+                wanted_counts[key] -= 1
+                linked.append(t)
     return sorted(linked, key=lambda t: (t.created_at, t.ticket_id))
 
 
