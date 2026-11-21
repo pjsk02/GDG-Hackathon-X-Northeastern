@@ -154,9 +154,10 @@ def test_tickets_list_action_and_outage_endpoints(monkeypatch):
     api_main._OUTAGE_TRACKER.reset()
 
 
-def test_rbac_signup_signin_and_role_enforcement(monkeypatch):
+def test_rbac_signup_signin_and_role_enforcement(tmp_path, monkeypatch):
     from api import auth as api_auth
 
+    monkeypatch.setattr(api_auth, "USERS_PATH", tmp_path / "users.json")
     api_auth.reset_users()
     ticket_store.reset()
     monkeypatch.setattr(api_main, "get_sentinel_agent", lambda: _FakeSentinelAgent(_sample_result(tier="PAGE_ONCALL")))

@@ -241,12 +241,17 @@ function saveSession(token, user) {
   currentUser = user;
   localStorage.setItem('sd_token', token);
   localStorage.setItem('sd_user', JSON.stringify(user));
+  localStorage.setItem('sd_last_email', user.email);
 }
 function logout() {
+  const lastEmail = (currentUser && currentUser.email) || localStorage.getItem('sd_last_email') || '';
   authToken = '';
   currentUser = null;
   localStorage.removeItem('sd_token');
   localStorage.removeItem('sd_user');
+  setAuthMode('signin');
+  document.getElementById('auth-email').value = lastEmail;
+  document.getElementById('auth-password').value = '';
   show('login');
 }
 async function openView(view) {
