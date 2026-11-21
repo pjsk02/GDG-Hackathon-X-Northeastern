@@ -140,3 +140,62 @@ tests/test_simulator.py (new).
 - "Fire demo burst" button: `simulator.fire(q)`; poll `q.stats()` and `q.snapshot()` to render the lanes;
   `q.fast_triage[tid]` gives the arrival labels to show why a ticket jumped.
 - Keep one queue per process (e.g. `st.cache_resource`) and call `q.shutdown()` on exit if you can.
+
+## Step 5 - Outage banner polish and incident grouping (B2 + N10)
+
+**Built**
+- sentinel/outage.py, tuned on the simulator burst. `observe(result)` / `check()` / `reset()` and the alert's
+  `headline` / `subjects` work as before.
+  - Why it missed the burst: with 22,869 indexed tickets the two English VPN reports shared 1 of 5 precedents
+    (Jaccard 0.11 < 0.4) and the German one shared none (hash cannot match across languages). Raw text similarity
+    (hash 0.39, TF-IDF 0.24) ranked routine pairs higher than the outage pair, so neither was usable.
+  - New link: same affected system, from an EN+DE term list (VPN, email, login, network, database, website, payments,
+    API, printer, phone, storage). Precedent overlap (Jaccard >= 0.4) still links tickets too; links are transitive.
+  - `check()` now reports the largest burst in the window, so the banner stays up while unrelated tickets arrive
+    (before, any later incident ticket made it disappear).
+  - `observe(result, ticket_id=...)` (optional) -> `alert.ticket_ids`; `alert.system` names the shared system.
+- sentinel/incidents.py (new): `group_burst(alert, tickets) -> Incident` (pydantic): `incident_id` ("INC-" + first
+  ticket number), `title`, `system`, `ticket_ids`, `subjects`, `shared_precedent` (most retrieved across the burst),
+  `language` (majority), `status_updates` {"en", "de"}, `status_update` (majority language), `first_seen`.
+  Status text is a template (no LLM). It quotes up to two clean sentences of the shared precedent's resolution
+  (no `<placeholders>`, questions, greetings or first person) only if the quote is in the update's language
+  (checked on the text: some dataset answers are in the other language); otherwise it names the precedent and team.
+  No time promises in the text.
+
+**Files**: sentinel/outage.py, sentinel/incidents.py (new), tests/test_outage.py (new), tests/test_incidents.py (new).
+
+**Verified**
+- `pytest -q tests/test_outage.py tests/test_incidents.py` -> 19 passed; `pytest -q` -> 119 passed (3 runs).
+- Real agent, `simulator.fire()` at concurrency 2, tracker fed from `on_result`: the alert fires on the 3rd VPN
+  ticket ("MAJOR INCIDENT: 3 tickets in the last 0.0 min report VPN failing (TKT-08109)"), links SD-1003, SD-1005,
+  SD-1006 (incl. the German one), and is still up after all 10 tickets. No routine ticket joins it.
+  `group_burst` -> INC-1003 "VPN outage", shared precedent TKT-08109, English text quotes its resolution, German
+  text names it (the answer is English).
+
+**How Kaushik calls it ("Group into one incident" button)**
+```python
+from sentinel import ticket_store
+from sentinel.incidents import group_burst
+from sentinel.outage import OutageTracker
+
+tracker = OutageTracker()                                      # one per process (st.cache_resource)
+q = SmartQueue(agent, settings.queue_concurrency,
+               on_result=lambda tid, r: tracker.observe(r, ticket_id=tid))   # ids make the grouping exact
+# console page without the queue: tracker.observe(result, ticket_id=tid) after save_result
+
+alert = tracker.check()
+if alert:
+    st.error(alert.headline)
+    if st.button("Group into one incident"):
+        incident = group_burst(alert, ticket_store.list_tickets())
+        st.subheader(f"{incident.incident_id}: {incident.title}")
+        st.write("Linked tickets:", ", ".join(incident.ticket_ids))
+        st.text_area("Status update (EN)", incident.status_updates["en"])
+        st.text_area("Statusmeldung (DE)", incident.status_updates["de"])
+```
+`group_burst` is pure (it changes no ticket). Without ticket ids it falls back to matching subjects.
+It raises `ValueError` if none of the given tickets belong to the alert.
+
+**Open issues**
+- Still waiting on a working Gemini key for Step 1's smoke index and Step 2's Gemini index + numbers.
+- With the hash index every demo ticket is ESCALATE / PAGE_ONCALL (gate owned by Kaushik/Je); re-check with Gemini.
