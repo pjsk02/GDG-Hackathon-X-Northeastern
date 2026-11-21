@@ -76,8 +76,11 @@ class OllamaEmbedder:
             if self.keep_alive:
                 body["keep_alive"] = self.keep_alive
             r = requests.post(f"{self.url}/api/embed", json=body, timeout=self.timeout)
-            if r.status_code >= 500:  # Ollama 500s while (re)loading or after its runner crashes: retry once
-                time.sleep(1)
+            # Ollama 500s while (re)loading or after its runner crashes, and 400s when a model
+            # cannot be scheduled right now (another model is filling the VRAM, a pull is running).
+            # Both clear on their own, so back off once rather than failing the request.
+            if r.status_code >= 400:
+                time.sleep(2)
                 r = requests.post(f"{self.url}/api/embed", json=body, timeout=self.timeout)
             r.raise_for_status()
             vecs.extend(r.json()["embeddings"])

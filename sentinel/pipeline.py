@@ -193,7 +193,11 @@ class SentinelAgent:
                     status[p] = "ok"
                 except LLMError as e:
                     status[p] = str(e)[:200]
-        self.store.search("warm up", k=1)  # builds the vector matrix cache
+        try:
+            self.store.search("warm up", k=1)  # builds the vector matrix cache (~70 MB read)
+            status["index"] = f"{self.store.count():,} tickets"
+        except Exception as e:  # never let a cold embedder stop the console from opening
+            status["index"] = str(e)[:200]
         return status
 
     def _generate(self, provider: str, subject: str, body: str, language: str,

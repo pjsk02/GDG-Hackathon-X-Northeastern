@@ -1,8 +1,27 @@
-.PHONY: install api ui eval eval-bench index-samples index-bench index-code index-docs index-media ask schema test vendor ollama-up ollama-down
+.PHONY: sentinel-split sentinel-train sentinel-index sentinel-eval console install api ui eval eval-bench index-samples index-bench index-code index-docs index-media ask schema test vendor ollama-up ollama-down
 
 # uv targets ./.venv automatically (the venv is uv-made and has no pip)
 install:
 	uv pip install -e ".[all]"
+
+# --- SentinelDesk ------------------------------------------------------------
+# Full pipeline from a clean checkout: split -> train -> index -> console.
+SENTINEL = MEMORY_PATH=data/sentinel.sqlite OLLAMA_KEEP_ALIVE=4h
+
+sentinel-split:
+	python -m sentinel.dataset
+
+sentinel-train:
+	python -m sentinel.triage --train
+
+sentinel-index:
+	$(SENTINEL) python -m sentinel.ingest_tickets --reset
+
+sentinel-eval:
+	python -m eval.sentinel_eval
+
+console:
+	streamlit run ui/sentinel_console.py
 
 # --- index -------------------------------------------------------------------
 index-samples:

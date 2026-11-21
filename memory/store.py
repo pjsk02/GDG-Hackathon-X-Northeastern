@@ -108,11 +108,22 @@ class VectorStore:
 
     def _matrix(self) -> tuple[list[str], np.ndarray]:
         if self._cache is None:
-            rows = self.db.execute(
-                "SELECT id, vec FROM chunks WHERE embedder = ?", (self.embedder.name,)
-            ).fetchall()
-            ids = [r[0] for r in rows]
-            matrix = np.stack([np.frombuffer(r[1], dtype=np.float32) for r in rows]) if rows else np.zeros((0, 0))
+            # Stream the cursor into one preallocated array instead of fetchall() + np.stack:
+            # same result at a fraction of the peak memory, which matters on a laptop that is
+            # also hosting two local models (22,869 x 768 float32 = 67 MB on its own).
+            n = self.count()
+            cursor = self.db.execute("SELECT id, vec FROM chunks WHERE embedder = ?", (self.embedder.name,))
+            ids, matrix = [], None
+            for i, (chunk_id, blob) in enumerate(cursor):
+                if matrix is None:
+                    matrix = np.empty((n, len(blob) // 4), dtype=np.float32)
+                if i < n:
+                    matrix[i] = np.frombuffer(blob, dtype=np.float32)
+                    ids.append(chunk_id)
+            if matrix is None:
+                matrix = np.zeros((0, 0), dtype=np.float32)
+            elif len(ids) < n:  # rows changed under us; keep only what was read
+                matrix = matrix[: len(ids)]
             self._cache = (ids, matrix)
         return self._cache
 
