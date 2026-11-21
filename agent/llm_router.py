@@ -129,7 +129,19 @@ class LLMRouter:
                 f"content={content[:120]!r}): {e.errors()[0]['msg'] if e.errors() else e}"
             ) from e
 
-    def _gemini(self, system: str, user: str, schema: type[T]) -> T:
+    def _gemini(self, system: str, user: str, schema: type[T], attempts: int = 2) -> T:
+        # Gemini free-tier models occasionally spike with transient 500/503 errors or truncated
+        # JSON. Mirror _ollama with one fast retry, without retrying 4xx, 504, or network errors.
+        for i in range(attempts):
+            try:
+                return self._gemini_once(system, user, schema)
+            except _TransientLLMError:
+                if i == attempts - 1:
+                    raise
+                time.sleep(0.5)
+        raise AssertionError("unreachable")
+
+    def _gemini_once(self, system: str, user: str, schema: type[T]) -> T:
         s = self.settings
         if not s.gemini_api_key:
             raise LLMError("GEMINI_API_KEY is not set")
@@ -164,7 +176,16 @@ class LLMRouter:
                 ),
             )
         except Exception as e:  # SDK raises several error types
+            code = getattr(e, "code", None)
+            if code in (500, 503):
+                raise _TransientLLMError(f"Gemini HTTP {code} (model={s.gemini_model}): {e}") from e
             raise LLMError(f"Gemini request failed (model={s.gemini_model}): {e}") from e
         if not resp.text:  # e.g. blocked by a safety filter
             raise LLMError(f"Gemini returned no text (model={s.gemini_model})")
-        return schema.model_validate_json(resp.text)
+        try:
+            return schema.model_validate_json(resp.text)
+        except ValidationError as e:
+            raise _TransientLLMError(
+                f"Gemini returned invalid {schema.__name__} JSON (model={s.gemini_model}, "
+                f"content={resp.text[:120]!r}): {e.errors()[0]['msg'] if e.errors() else e}"
+            ) from e
